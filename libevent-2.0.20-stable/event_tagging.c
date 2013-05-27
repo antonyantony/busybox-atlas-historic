@@ -26,15 +26,16 @@
  */
 
 #include "event2/event-config.h"
+#include "evconfig-private.h"
 
-#ifdef _EVENT_HAVE_SYS_TYPES_H
+#ifdef EVENT__HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
-#ifdef _EVENT_HAVE_SYS_PARAM_H
+#ifdef EVENT__HAVE_SYS_PARAM_H
 #include <sys/param.h>
 #endif
 
-#ifdef WIN32
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
 #include <windows.h>
@@ -44,7 +45,7 @@
 #endif
 
 #include <sys/queue.h>
-#ifdef _EVENT_HAVE_SYS_TIME_H
+#ifdef EVENT__HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
 
@@ -52,10 +53,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef WIN32
+#ifndef _WIN32
 #include <syslog.h>
 #endif
-#ifdef _EVENT_HAVE_UNISTD_H
+#ifdef EVENT__HAVE_UNISTD_H
 #include <unistd.h>
 #endif
 #include <limits.h>

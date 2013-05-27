@@ -24,8 +24,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _EVENT2_EVENT_H_
-#define _EVENT2_EVENT_H_
+#ifndef EVENT2_EVENT_H_INCLUDED_
+#define EVENT2_EVENT_H_INCLUDED_
 
 /**
    @mainpage
@@ -39,7 +39,7 @@
   to signals or regular timeouts.
 
   Libevent is meant to replace the event loop found in event driven network
-  servers. An application just needs to call event_dispatch() and then add or
+  servers. An application just needs to call event_base_dispatch() and then add or
   remove events dynamically without having to change the event loop.
 
 
@@ -90,7 +90,7 @@
   remain allocated as long as it is active, so it should generally be
   allocated on the heap.
 
-  @section loop Dispaching evets.
+  @section loop Dispatching events.
 
   Finally, you call event_base_dispatch() to loop and dispatch events.
   You can also use event_base_loop() for more fine-grained control.
@@ -185,10 +185,10 @@ extern "C" {
 #endif
 
 #include <event2/event-config.h>
-#ifdef _EVENT_HAVE_SYS_TYPES_H
+#ifdef EVENT__HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
-#ifdef _EVENT_HAVE_SYS_TIME_H
+#ifdef EVENT__HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
 
@@ -211,7 +211,7 @@ extern "C" {
  *    event_base_new_with_config()
  */
 struct event_base
-#ifdef _EVENT_IN_DOXYGEN
+#ifdef EVENT_IN_DOXYGEN_
 {/*Empty body so that doxygen will generate documentation here.*/}
 #endif
 ;
@@ -270,7 +270,7 @@ struct event_base
  *    event_priority_set()
  */
 struct event
-#ifdef _EVENT_IN_DOXYGEN
+#ifdef EVENT_IN_DOXYGEN_
 {/*Empty body so that doxygen will generate documentation here.*/}
 #endif
 ;
@@ -289,7 +289,7 @@ struct event
  *   event_config_set_flag(), event_config_set_num_cpus_hint()
  */
 struct event_config
-#ifdef _EVENT_IN_DOXYGEN
+#ifdef EVENT_IN_DOXYGEN_
 {/*Empty body so that doxygen will generate documentation here.*/}
 #endif
 ;
@@ -450,7 +450,11 @@ enum event_method_feature {
  */
 enum event_base_config_flag {
 	/** Do not allocate a lock for the event base, even if we have
-	    locking set up. */
+	    locking set up.
+
+	    Setting this option will make it unsafe and nonfunctional to call
+	    functions on the base concurrently from multiple threads.
+	*/
 	EVENT_BASE_FLAG_NOLOCK = 0x01,
 	/** Do not check the EVENT_* environment variables when configuring
 	    an event_base  */
@@ -481,7 +485,14 @@ enum event_base_config_flag {
 	    This flag has no effect if you wind up using a backend other than
 	    epoll.
 	 */
-	EVENT_BASE_FLAG_EPOLL_USE_CHANGELIST = 0x10
+	EVENT_BASE_FLAG_EPOLL_USE_CHANGELIST = 0x10,
+
+	/** Ordinarily, Libevent implements its time and timeout code using
+	    the fastest monotonic timer that we have.  If this flag is set,
+	    however, we use less efficient more precise timer, assuming one is
+	    present.
+	 */
+	EVENT_BASE_FLAG_PRECISE_TIMER = 0x20
 };
 
 /**
@@ -537,6 +548,38 @@ int event_config_set_flag(struct event_config *cfg, int flag);
 int event_config_set_num_cpus_hint(struct event_config *cfg, int cpus);
 
 /**
+ * Record an interval and/or a number of callbacks after which the event base
+ * should check for new events.  By default, the event base will run as many
+ * events are as activated at the higest activated priority before checking
+ * for new events.  If you configure it by setting max_interval, it will check
+ * the time after each callback, and not allow more than max_interval to
+ * elapse before checking for new events.  If you configure it by setting
+ * max_callbacks to a value >= 0, it will run no more than max_callbacks
+ * callbacks before checking for new events.
+ *
+ * This option can decrease the latency of high-priority events, and
+ * avoid priority inversions where multiple low-priority events keep us from
+ * polling for high-priority events, but at the expense of slightly decreasing
+ * the throughput.  Use it with caution!
+ *
+ * @param cfg The event_base configuration object.
+ * @param max_interval An interval after which Libevent should stop running
+ *     callbacks and check for more events, or NULL if there should be
+ *     no such interval.
+ * @param max_callbacks A number of callbacks after which Libevent should
+ *     stop running callbacks and check for more events, or -1 if there
+ *     should be no such limit.
+ * @param min_priority A priority below which max_interval and max_callbacks
+ *     should not be enforced.  If this is set to 0, they are enforced
+ *     for events of every priority; if it's set to 1, they're enforced
+ *     for events of priority 1 and above, and so on.
+ * @return 0 on success, -1 on failure.
+ **/
+int event_config_set_max_dispatch_interval(struct event_config *cfg,
+    const struct timeval *max_interval, int max_callbacks,
+    int min_priority);
+
+/**
   Initialize the event API.
 
   Use event_base_new_with_config() to initialize a new event base, taking
@@ -556,9 +599,20 @@ struct event_base *event_base_new_with_config(const struct event_config *);
   Note that this function will not close any fds or free any memory passed
   to event_new as the argument to callback.
 
+  If there are any pending finalizer callbacks, this function will invoke
+  them.
+
   @param eb an event_base to be freed
  */
 void event_base_free(struct event_base *);
+
+/**
+   As event_free, but do not run finalizers.
+
+   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
+   BECOMES STABLE.
+ */
+void event_base_free_nofinalize(struct event_base *);
 
 /** @name Log severities
  */
@@ -586,7 +640,7 @@ typedef void (*event_log_cb)(int severity, const char *msg);
   Redirect Libevent's log messages.
 
   @param cb a function taking two arguments: an integer severity between
-     _EVENT_LOG_DEBUG and _EVENT_LOG_ERR, and a string.  If cb is NULL,
+     EVENT_LOG_DEBUG and EVENT_LOG_ERR, and a string.  If cb is NULL,
 	 then the default log is used.
 
   NOTE: The function you provide *must not* call any other libevent
@@ -610,10 +664,29 @@ typedef void (*event_fatal_cb)(int err);
  something is wrong with your program, or with Libevent: any subsequent calls
  to Libevent may result in undefined behavior.
 
- Libevent will (almost) always log an _EVENT_LOG_ERR message before calling
+ Libevent will (almost) always log an EVENT_LOG_ERR message before calling
  this function; look at the last log message to see why Libevent has died.
  */
 void event_set_fatal_callback(event_fatal_cb cb);
+
+#define EVENT_DBG_ALL 0xffffffffu
+#define EVENT_DBG_NONE 0
+
+/**
+ Turn on debugging logs and have them sent to the default log handler.
+
+ This is a global setting; if you are going to call it, you must call this
+ before any calls that create an event-base.  You must call it before any
+ multithreaded use of Libevent.
+
+ Debug logs are verbose.
+
+ @param which Controls which debug messages are turned on.  This option is
+   unused for now; for forward compatibility, you must pass in the constant
+   "EVENT_DBG_ALL" to turn debugging logs on, or "EVENT_DBG_NONE" to turn
+   debugging logs off.
+ */
+void event_enable_debug_logging(ev_uint32_t which);
 
 /**
   Associate a different event base with an event.
@@ -637,6 +710,11 @@ int event_base_set(struct event_base *, struct event *);
 /** Do not block: see which events are ready now, run the callbacks
  * of the highest-priority ones, then exit. */
 #define EVLOOP_NONBLOCK	0x02
+/** Do not exit the loop because we have no pending events.  Instead, keep
+ * running until event_base_loopexit() or event_base_loopbreak() makes us
+ * stop.
+ */
+#define EVLOOP_NO_EXIT_ON_EMPTY 0x04
 /**@}*/
 
 /**
@@ -683,7 +761,7 @@ int event_base_loopexit(struct event_base *, const struct timeval *);
   event_base_loopbreak() is typically invoked from this event's callback.
   This behavior is analogous to the "break;" statement.
 
-  Subsequent invocations of event_loop() will proceed normally.
+  Subsequent invocations of event_base_loop() will proceed normally.
 
   @param eb the event_base structure returned by event_init()
   @return 0 if successful, or -1 if an error occurred
@@ -692,7 +770,26 @@ int event_base_loopexit(struct event_base *, const struct timeval *);
 int event_base_loopbreak(struct event_base *);
 
 /**
-  Checks if the event loop was told to exit by event_loopexit().
+  Tell the active event_base_loop() to scan for new events immediately.
+
+  Calling this function makes the currently active event_base_loop()
+  start the loop over again (scanning for new events) after the current
+  event callback finishes.  If the event loop is not running, this
+  function has no effect.
+
+  event_base_loopbreak() is typically invoked from this event's callback.
+  This behavior is analogous to the "continue;" statement.
+
+  Subsequent invocations of event loop will proceed normally.
+
+  @param eb the event_base structure returned by event_init()
+  @return 0 if successful, or -1 if an error occurred
+  @see event_base_loopbreak()
+ */
+int event_base_loopcontinue(struct event_base *);
+
+/**
+  Checks if the event loop was told to exit by event_base_loopexit().
 
   This function will return true for an event_base at every point after
   event_loopexit() is called, until the event loop is next entered.
@@ -706,10 +803,10 @@ int event_base_loopbreak(struct event_base *);
 int event_base_got_exit(struct event_base *);
 
 /**
-  Checks if the event loop was told to abort immediately by event_loopbreak().
+  Checks if the event loop was told to abort immediately by event_base_loopbreak().
 
   This function will return true for an event_base at every point after
-  event_loopbreak() is called, until the event loop is next entered.
+  event_base_loopbreak() is called, until the event loop is next entered.
 
   @param eb the event_base structure returned by event_init()
   @return true if event_base_loopbreak() was called on this event base,
@@ -743,7 +840,19 @@ int event_base_got_break(struct event_base *);
  */
 #define EV_PERSIST	0x10
 /** Select edge-triggered behavior, if supported by the backend. */
-#define EV_ET       0x20
+#define EV_ET		0x20
+/**
+ * If this option is provided, then event_del() will not block in one thread
+ * while waiting for the event callback to complete in another thread.
+ *
+ * To use this option safely, you may need to use event_finalize() or
+ * event_free_finalize() in order to safely tear down an event in a
+ * multithreaded application.  See those functions for more information.
+ *
+ * THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
+ * BECOMES STABLE.
+ **/
+#define EV_FINALIZE     0x40
 /**@}*/
 
 /**
@@ -788,6 +897,30 @@ int event_base_got_break(struct event_base *);
    @see event_new()
  */
 typedef void (*event_callback_fn)(evutil_socket_t, short, void *);
+
+/**
+  Return a value used to specify that the event itself must be used as the callback argument.
+
+  The function event_new() takes a callback argument which is passed
+  to the event's callback function. To specify that the argument to be
+  passed to the callback function is the event that event_new() returns,
+  pass in the return value of event_self_cbarg() as the callback argument
+  for event_new().
+
+  For example:
+  <pre>
+      struct event *ev = event_new(base, sock, events, callback, %event_self_cbarg());
+  </pre>
+
+  For consistency with event_new(), it is possible to pass the return value
+  of this function as the callback argument for event_assign() &ndash; this
+  achieves the same result as passing the event in directly.
+
+  @return a value to be passed as the callback argument to event_new() or
+  event_assign().
+  @see event_new(), event_assign()
+ */
+void *event_self_cbarg(void);
 
 /**
   Allocate and asssign a new event structure, ready to be added.
@@ -889,15 +1022,63 @@ int event_assign(struct event *, struct event_base *, evutil_socket_t, short, ev
 void event_free(struct event *);
 
 /**
+ * Callback type for event_finalize and event_free_finalize().
+ *
+ * THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
+ * BECOMES STABLE.
+ *
+ **/
+typedef void (*event_finalize_callback_fn)(struct event *, void *);
+/**
+   @name Finalization functions
+
+   These functions are used to safely tear down an event in a multithreaded
+   application.  If you construct your events with EV_FINALIZE to avoid
+   deadlocks, you will need a way to remove an event in the certainty that
+   it will definitely not be running its callback when you deallocate it
+   and its callback argument.
+
+   To do this, call one of event_finalize() or event_free_finalize with
+   0 for its first argument, the event to tear down as its second argument,
+   and a callback function as its third argument.  The callback will be
+   invoked as part of the event loop, with the event's priority.
+
+   After you call a finalizer function, event_add() and event_active() will
+   no longer work on the event, and event_del() will produce a no-op. You
+   must not try to change the event's fields with event_assign() or
+   event_set() while the finalize callback is in progress.  Once the
+   callback has been invoked, you should treat the event structure as
+   containing uninitialized memory.
+
+   The event_free_finalize() function frees the event after it's finalized;
+   event_finalize() does not.
+
+   A finalizer callback must not make events pending or active.  It must not
+   add events, activate events, or attempt to "resucitate" the event being
+   finalized in any way.
+
+   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
+   BECOMES STABLE.
+
+   @return 0 on succes, -1 on failure.
+ */
+/**@{*/
+int event_finalize(unsigned, struct event *, event_finalize_callback_fn);
+int event_free_finalize(unsigned, struct event *, event_finalize_callback_fn);
+/**@}*/
+
+/**
   Schedule a one-time event
 
-  The function event_base_once() is similar to event_set().  However, it
+  The function event_base_once() is similar to event_new().  However, it
   schedules a callback to be called exactly once, and does not require the
   caller to prepare an event structure.
 
-  Note that in Libevent 2.0 and earlier, if the event is never triggered,
-  the internal memory used to hold it will never be freed.  This may be
-  fixed in a later version of Libevent.
+  Note that in Libevent 2.0 and earlier, if the event is never triggered, the
+  internal memory used to hold it will never be freed.  In Libevent 2.1,
+  the internal memory will get freed by event_base_free() if the event
+  is never triggered.  The 'arg' value, however, will not get freed in either
+  case--you'll need to free that on your own if you want it to go away.
 
   @param base an event_base
   @param fd a file descriptor to monitor, or -1 for no fd.
@@ -925,16 +1106,26 @@ int event_base_once(struct event_base *, evutil_socket_t, short, event_callback_
   in calls to event_assign() until it is no longer pending.
 
   If the event in the ev argument already has a scheduled timeout, calling
-  event_add() replaces the old timeout with the new one, or clears the old
-  timeout if the timeout argument is NULL.
+  event_add() replaces the old timeout with the new one if tv is non-NULL.
 
-  @param ev an event struct initialized via event_set()
+  @param ev an event struct initialized via event_assign() or event_new()
   @param timeout the maximum amount of time to wait for the event, or NULL
          to wait forever
   @return 0 if successful, or -1 if an error occurred
   @see event_del(), event_assign(), event_new()
   */
 int event_add(struct event *ev, const struct timeval *timeout);
+
+/**
+   Remove a timer from a pending event without removing the event itself.
+
+   If the event has a scheduled timeout, this function unschedules it but
+   leaves the event otherwise pending.
+
+   @param ev an event struct initialized via event_assign() or event_new()
+   @return 0 on success, or -1 if  an error occurrect.
+*/
+int event_remove_timer(struct event *ev);
 
 /**
   Remove an event from the set of monitored events.
@@ -949,6 +1140,24 @@ int event_add(struct event *ev, const struct timeval *timeout);
  */
 int event_del(struct event *);
 
+/**
+   As event_del(), but never blocks while the event's callback is running
+   in another thread, even if the event was constructed without the
+   EV_FINALIZE flag.
+
+   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
+   BECOMES STABLE.
+ */
+int event_del_noblock(struct event *ev);
+/**
+   As event_del(), but always blocks while the event's callback is running
+   in another thread, even if the event was constructed with the
+   EV_FINALIZE flag.
+
+   THIS IS AN EXPERIMENTAL API. IT MIGHT CHANGE BEFORE THE LIBEVENT 2.1 SERIES
+   BECOMES STABLE.
+ */
+int event_del_block(struct event *ev);
 
 /**
   Make an event active.
@@ -981,6 +1190,13 @@ void event_active(struct event *ev, int res, short ncalls);
  */
 int event_pending(const struct event *ev, short events, struct timeval *tv);
 
+/**
+   If called from within the callback for an event, returns that event.
+
+   The behavior of this function is not defined when called from outside the
+   callback function for an event.
+ */
+struct event *event_base_get_running_event(struct event_base *base);
 
 /**
   Test if an event structure might be initialized.
@@ -1029,6 +1245,12 @@ event_callback_fn event_get_callback(const struct event *ev);
    Return the callback argument assigned to an event.
 */
 void *event_get_callback_arg(const struct event *ev);
+
+/**
+   Return the priority of an event.
+   @see event_priority_init(), event_get_priority()
+*/
+int event_get_priority(const struct event *ev);
 
 /**
    Extract _all_ of arguments given to construct a given event.  The
@@ -1081,10 +1303,10 @@ const char *event_get_version(void);
 ev_uint32_t event_get_version_number(void);
 
 /** As event_get_version, but gives the version of Libevent's headers. */
-#define LIBEVENT_VERSION _EVENT_VERSION
+#define LIBEVENT_VERSION EVENT__VERSION
 /** As event_get_version_number, but gives the version number of Libevent's
  * headers. */
-#define LIBEVENT_VERSION_NUMBER _EVENT_NUMERIC_VERSION
+#define LIBEVENT_VERSION_NUMBER EVENT__NUMERIC_VERSION
 
 /** Largest number of priorities that Libevent can support. */
 #define EVENT_MAX_PRIORITIES 256
@@ -1118,12 +1340,21 @@ ev_uint32_t event_get_version_number(void);
 int	event_base_priority_init(struct event_base *, int);
 
 /**
+  Get the number of different event priorities.
+
+  @param eb the event_base structure returned by event_base_new()
+  @return Number of different event priorities
+  @see event_base_priority_init()
+*/
+int	event_base_get_npriorities(struct event_base *eb);
+
+/**
   Assign a priority to an event.
 
   @param ev an event struct
   @param priority the new priority to be assigned
   @return 0 if successful, or -1 if an error occurred
-  @see event_priority_init()
+  @see event_priority_init(), event_get_priority()
   */
 int	event_priority_set(struct event *, int);
 
@@ -1149,7 +1380,7 @@ int	event_priority_set(struct event *, int);
 const struct timeval *event_base_init_common_timeout(struct event_base *base,
     const struct timeval *duration);
 
-#if !defined(_EVENT_DISABLE_MM_REPLACEMENT) || defined(_EVENT_IN_DOXYGEN)
+#if !defined(EVENT__DISABLE_MM_REPLACEMENT) || defined(EVENT_IN_DOXYGEN_)
 /**
  Override the functions that Libevent uses for memory management.
 
@@ -1181,7 +1412,51 @@ void event_set_mem_functions(
 #define EVENT_SET_MEM_FUNCTIONS_IMPLEMENTED
 #endif
 
+/**
+   Writes a human-readable description of all inserted and/or active
+   events to a provided stdio stream.
+
+   This is intended for debugging; its format is not guaranteed to be the same
+   between libevent versions.
+
+   @param base An event_base on which to scan the events.
+   @param output A stdio file to write on.
+ */
 void event_base_dump_events(struct event_base *, FILE *);
+
+
+/**
+ * Callback for iterating events in an event base via event_base_foreach_event
+ */
+typedef int (*event_base_foreach_event_cb)(const struct event_base *, const struct event *, void *);
+
+/**
+   Iterate over all added or active events events in an event loop, and invoke
+   a given callback on each one.
+
+   The callback must not call any function that modifies the event base, that
+   modifies any event in the event base, or that adds or removes any event to
+   the event base.  Doing so is unsupported and will lead to undefined
+   behavior -- likely, to crashes.
+
+   event_base_foreach_event() holds a lock on the event_base() for the whole
+   time it's running: slow callbacks are not advisable.
+
+   Note that Libevent adds some events of its own to make pieces of its
+   functionality work.  You must not assume that the only events you'll
+   encounter will be the ones you added yourself.
+
+   The callback function must return 0 to continue iteration, or some other
+   integer to stop iterating.
+
+   @param base An event_base on which to scan the events.
+   @param fn   A callback function to receive the events.
+   @param arg  An argument passed to the callback function.
+   @return 0 if we iterated over every event, or the value returned by the
+      callback function if the loop exited early.
+*/
+int event_base_foreach_event(struct event_base *base, event_base_foreach_event_cb fn, void *arg);
+
 
 /** Sets 'tv' to the current time (as returned by gettimeofday()),
     looking at the cached value in 'base' if possible, and calling
@@ -1197,8 +1472,38 @@ void event_base_dump_events(struct event_base *, FILE *);
 int event_base_gettimeofday_cached(struct event_base *base,
     struct timeval *tv);
 
+/** Update cached_tv in the 'base' to the current time
+ *
+ * You can use this function is useful for selectively increasing
+ * the accuracy of the cached time value in 'base' during callbacks
+ * that take a long time to execute.
+ *
+ * This function has no effect if the base is currently not in its
+ * event loop, or if timeval caching is disabled via
+ * EVENT_BASE_FLAG_NO_CACHE_TIME.
+ *
+ * @return 0 on success, -1 on failure
+ */
+int event_base_update_cache_time(struct event_base *base);
+
+/** Release up all globally-allocated resources allocated by Libevent.
+
+    This function does not free developer-controlled resources like
+    event_bases, events, bufferevents, listeners, and so on.  It only releases
+    resources like global locks that there is no other way to free.
+
+    It is not actually necessary to call this function before exit: every
+    resource that it frees would be released anyway on exit.  It mainly exists
+    so that resource-leak debugging tools don't see Libevent as holding
+    resources at exit.
+
+    You should only call this function when no other Libevent functions will
+    be invoked -- e.g., when cleanly exiting a program.
+ */
+void libevent_global_shutdown(void);
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* _EVENT2_EVENT_H_ */
+#endif /* EVENT2_EVENT_H_INCLUDED_ */

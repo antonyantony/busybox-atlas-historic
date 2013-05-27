@@ -132,8 +132,8 @@
  * with the next probe.
  */
 
-#ifndef _EVENT2_DNS_H_
-#define _EVENT2_DNS_H_
+#ifndef EVENT2_DNS_H_INCLUDED_
+#define EVENT2_DNS_H_INCLUDED_
 
 #ifdef __cplusplus
 extern "C" {
@@ -201,6 +201,12 @@ typedef void (*evdns_callback_type) (int result, char type, int count, int ttl, 
 struct evdns_base;
 struct event_base;
 
+/** Flag for evdns_base_new: process resolv.conf.  */
+#define EVDNS_BASE_INITIALIZE_NAMESERVERS 1
+/** Flag for evdns_base_new: Do not prevent the libevent event loop from
+ * exiting when we have no active dns requests. */
+#define EVDNS_BASE_DISABLE_WHEN_INACTIVE 0x8000
+
 /**
   Initialize the asynchronous DNS library.
 
@@ -209,7 +215,8 @@ struct event_base;
   evdns_config_windows_nameservers() on Windows.
 
   @param event_base the event base to associate the dns client with
-  @param initialize_nameservers 1 if resolve.conf processing should occur
+  @param flags any of EVDNS_BASE_INITIALIZE_NAMESERVERS|
+    EVDNS_BASE_DISABLE_WHEN_INACTIVE
   @return evdns_base object if successful, or NULL if an error occurred.
   @see evdns_base_free()
  */
@@ -450,7 +457,7 @@ int evdns_base_load_hosts(struct evdns_base *base, const char *hosts_fname);
   @return 0 if successful, or -1 if an error occurred
   @see evdns_resolv_conf_parse()
  */
-#ifdef WIN32
+#ifdef _WIN32
 int evdns_base_config_windows_nameservers(struct evdns_base *);
 #define EVDNS_BASE_CONFIG_WINDOWS_NAMESERVERS_IMPLEMENTED
 #endif
@@ -601,7 +608,7 @@ struct sockaddr;
 /**
     Get the address that made a DNS request.
  */
-int evdns_server_request_get_requesting_addr(struct evdns_server_request *_req, struct sockaddr *sa, int addr_len);
+int evdns_server_request_get_requesting_addr(struct evdns_server_request *req, struct sockaddr *sa, int addr_len);
 
 /** Callback for evdns_getaddrinfo. */
 typedef void (*evdns_getaddrinfo_cb)(int result, struct evutil_addrinfo *res, void *arg);
@@ -640,4 +647,4 @@ void evdns_getaddrinfo_cancel(struct evdns_getaddrinfo_request *req);
 }
 #endif
 
-#endif  /* !_EVENT2_DNS_H_ */
+#endif  /* !EVENT2_DNS_H_INCLUDED_ */

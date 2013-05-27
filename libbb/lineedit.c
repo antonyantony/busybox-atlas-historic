@@ -82,7 +82,7 @@ static bool BB_ispunct(CHAR_T c) { return ((unsigned)c < 256 && ispunct(c)); }
 # define isspace isspace_must_not_be_used
 # define isalnum isalnum_must_not_be_used
 # define ispunct ispunct_must_not_be_used
-# define isprint isprint_must_not_be_used
+/* # define isprint isprint_must_not_be_used Antony remove me */
 #else
 # define BB_NUL '\0'
 # define CHAR_T char

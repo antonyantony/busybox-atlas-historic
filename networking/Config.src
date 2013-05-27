@@ -286,6 +286,12 @@ config FEATURE_HTTPD_GZIP
 	  Makes httpd send files using GZIP content encoding if the
 	  client supports it and a pre-compressed <file>.gz exists.
 
+config HTTPPOST
+	bool "httppost"
+	default y
+	help
+          simple httppost --post-file with IPv4. RIPE NCC 2011
+
 config IFCONFIG
 	bool "ifconfig"
 	default y

@@ -1903,11 +1903,12 @@ static ALWAYS_INLINE unsigned char bb_ascii_tolower(unsigned char a)
 /* In ASCII and Unicode, these are likely to be very different.
  * Let's prevent ambiguous usage from the start */
 #define isgraph(a) isgraph_is_ambiguous_dont_use(a)
-#define isprint(a) isprint_is_ambiguous_dont_use(a)
+/* #define isprint(a) isprint_is_ambiguous_dont_use(a) Antony remove me */
 /* NB: must not treat EOF as isgraph or isprint */
 #define isgraph_asciionly(a) ((unsigned)((a) - 0x21) <= 0x7e - 0x21)
 #define isprint_asciionly(a) ((unsigned)((a) - 0x20) <= 0x7e - 0x20)
-
+#define strlcpy safe_strncpy
+#define strlcat strncat
 
 POP_SAVED_FUNCTION_VISIBILITY
 
