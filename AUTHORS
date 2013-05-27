@@ -174,3 +174,9 @@ Mike Frysinger <vapier@gentoo.org>
 
 Jie Zhang <jie.zhang@analog.com>
     fixed two bugs in msh and hush (exitcode of killed processes)
+
+Philip Homburg <philip.homburg@ripe.net>
+    eperd  evtraceroute evping perd condmv httpget httppost
+
+Antony Antony <antony@ripe.net>
+    evtdig buddyinfo findpid
