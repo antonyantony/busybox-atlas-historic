@@ -466,6 +466,7 @@ core-y		:= \
 libs-y		:= \
 		archival/ \
 		archival/libarchive/ \
+		eperd/ \
 		console-tools/ \
 		coreutils/ \
 		coreutils/libcoreutils/ \
