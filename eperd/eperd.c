@@ -247,9 +247,9 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 	/* "-b after -f is ignored", and so on for every pair a-b */
 	opt_complementary = "f-b:b-f:S-L:L-S" IF_FEATURE_PERD_D(":d-l")
 			":l+:d+"; /* -l and -d have numeric param */
-	opt = getopt32(argv, "l:L:fbSc:A:DP:" IF_FEATURE_PERD_D("d:") "O:",
+	opt = getopt32(argv, "l:L:fbSc:A:DP:" IF_FEATURE_EPERD_D("d:") "O:",
 			&LogLevel, &LogFile, &CDir, &atlas_id, &PidFileName
-			IF_FEATURE_PERD_D(,&LogLevel), &out_filename);
+			IF_FEATURE_EPERD_D(,&LogLevel), &out_filename);
 	/* both -d N and -l N set the same variable: LogLevel */
 
 	if (!(opt & OPT_f)) {

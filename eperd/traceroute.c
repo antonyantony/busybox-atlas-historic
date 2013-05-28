@@ -2366,7 +2366,7 @@ static void *traceroute_init(int __attribute((unused)) argc, char *argv[],
 	{
 		if (!validate_filename(out_filename, SAFE_PREFIX))
 		{
-			crondlog(LVL8 "insecure file '%s'", out_filename);
+			crondlog(LVL8 "insecure file '%s' allowed %s", out_filename, SAFE_PREFIX);
 			return NULL;
 		}
 		fh= fopen(out_filename, "a");

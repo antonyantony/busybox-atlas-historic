@@ -1291,7 +1291,7 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	if (qry->out_filename &&
 		!validate_filename(qry->out_filename, SAFE_PREFIX))
 	{
-		crondlog(LVL8 "insecure file '%s'", qry->out_filename);
+		crondlog(LVL8 "insecure file '%s' allowed %s", qry->out_filename, SAFE_PREFIX);
 		tdig_delete(qry);
 		return NULL;
 	}

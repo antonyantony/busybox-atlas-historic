@@ -10,8 +10,8 @@
 #define ATLAS_DATA_OOQ_OUT      ATLAS_HOME "/data/ooq.out"
 #define ATLAS_TIMESYNC_FILE     ATLAS_STATUS "/timesync.vol"
 
-#define ATLAS_CRONS             CONFIG_FEATURE_EPERD_OUT_DIR 
+#define ATLAS_CRONS             CONFIG_FEATURE_EPERD_CRONS_DIR 
 #define ATLAS_DATA_OUT          CONFIG_FEATURE_EPERD_OUT_DIR
-#define ATLAS_DATA_NEW          CONFIG_FEATURE_EPERD_OUT_DIR 
+#define ATLAS_DATA_NEW          CONFIG_FEATURE_EPERD_NEW_DIR 
 
 int get_probe_id(void);

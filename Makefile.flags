@@ -154,7 +154,7 @@ LDLIBS += dmalloc
 endif 
 
 LDLIBS += event
-LDFLAGS += -Llibevent/.libs -Wl,-rpath,/usr/local/atlas/lib -Wl,-rpath,/home/atlas/busybox-1.13.3/libevent/.libs
+LDFLAGS += -Llibevent/.libs -Wl,-rpath,/usr/local/atlas/lib -Wl,-rpath,libevent/.libs
 
 
 # If a flat binary should be built, CFLAGS_busybox="-elf2flt"
