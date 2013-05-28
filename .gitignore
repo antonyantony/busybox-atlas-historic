@@ -11,7 +11,7 @@ Config.in
 cscope.out
 */cscope.out
 
-libevent-2.0.20-stable/.git
+libevent/.git
 
 #
 # Never ignore these

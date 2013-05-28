@@ -23,11 +23,32 @@ config EPERD
 	help
 	    Eperd periodically runs Atlas measurements. It is based on crond.
 
+config FEATURE_EPERD_CRON_DIR
+	string "eperd commands directory. commands in file root"
+	default "/var/lib/atlas/crons/"
+	depends on EPERD 
+	help
+	  Location of eperd spool.
+
+config FEATURE_EPERD_OUT_DIR
+	string "eperd output directory."
+	default "/var/lib/atlas/out/"
+	depends on EPERD 
+	help
+	  Location of eperd output ready to be fetched/deleted.
+
+config FEATURE_EPERD_WORK_DIR
+	string "eperd working directory."
+	default "/var/lib/atlas/new/"
+	depends on EPERD 
+	help
+	  Location of eperd working files. Leave them alone.
+
 config EVHTTPGET
        bool "evhttpget"
        default n
        help
-               standalone version of event-driven httpget
+         standalone version of event-driven httpget
 
 config EVPING
 	bool "evping"
