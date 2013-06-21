@@ -37,12 +37,6 @@
 #ifndef TMPDIR
 #define TMPDIR          "/var/spool/cron"
 #endif
-#ifndef SENDMAIL
-#define SENDMAIL        "sendmail"
-#endif
-#ifndef SENDMAIL_ARGS
-#define SENDMAIL_ARGS   "-ti", "oem"
-#endif
 #ifndef CRONUPDATE
 #define CRONUPDATE      "cron.update"
 #endif
@@ -318,61 +312,8 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 	}
 	else 
 	{
-		write_pidfile("/var/run/crond.pid");
+		write_pidfile("/var/run/eperd.pid");
 	}
-#if 0
-	/* main loop - synchronize to 1 second after the minute, minimum sleep
-	 * of 1 second. */
-	{
-		time_t t1 = time(NULL);
-		time_t next;
-		time_t last_minutely= 0;
-		time_t last_hourly= 0;
-		int sleep_time = 10; /* AA previously 60 */
-		for (;;) {
-			kick_watchdog();
-			sleep(sleep_time);
-
-			kick_watchdog();
-
-			if (t1 >= last_minutely + 60)
-			{
-				last_minutely= t1;
-				CheckUpdates();
-			}
-			if (t1 >= last_hourly + 3600)
-			{
-				last_hourly= t1;
-				SynchronizeDir();
-			}
-			{
-				sleep_time= 60;
-				if (do_kick_watchdog)
-					sleep_time= 10;
-				TestJobs(&next);
-				crondlog(LVL7 "got next %d, now %d",
-					next, time(NULL));
-				if (!next)
-				{
-					crondlog(LVL7 "calling RunJobs at %d",
-						time(NULL));
-					RunJobs();
-					crondlog(LVL7 "RunJobs ended at %d",
-						time(NULL));
-					sleep_time= 1;
-				} else if (next > t1 && next < t1+sleep_time)
-					sleep_time= next-t1;
-				if (CheckJobs() > 0) {
-					sleep_time = 10;
-				}
-				crondlog(
-				LVL7 "t1 = %d, next = %d, sleep_time = %d",
-					t1, next, sleep_time);
-			}
-			t1= time(NULL);
-		}
-	}
-#endif
 	r= event_base_loop(EventBase, 0);
 	if (r != 0)
 		crondlog(LVL9 "event_base_loop failed");
@@ -978,7 +919,7 @@ static void RunJob(evutil_socket_t __attribute__ ((unused)) fd,
 	tv.tv_usec= 0;
 	crondlog(LVL7 "RunJob: nextcycle %d, interval %d, start_time %d, distr_offset %d, now %d, tv_sec %d",
 		line->nextcycle, line->interval,
-		line->start_time, line->distr_offset, now,
+		line->start_time, line->distr_offset, now, 
 		tv.tv_sec);
 	event_add(&line->event, &tv);
 }
