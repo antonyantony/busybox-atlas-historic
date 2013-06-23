@@ -15,8 +15,8 @@
 #include "eperd.h"
 
 #define SUFFIX 		".curr"
-#define OOQD_NEW_PREFIX	"/home/atlas/data/new/ooq"
-#define OOQD_OUT	"/home/atlas/data/ooq.out/ooq"
+#define OOQD_NEW_PREFIX	CONFIG_FEATURE_EPERD_NEW_DIR"/eooq"
+#define OOQD_OUT	CONFIG_FEATURE_EPERD_OUT_DIR"/eooq"
 
 #define ATLAS_NARGS	64	/* Max arguments to a built-in command */
 #define ATLAS_ARGSIZE	512	/* Max size of the command line */
