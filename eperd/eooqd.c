@@ -99,7 +99,7 @@ int eooqd_main(int argc, char *argv[])
 	state->atlas_id= atlas_id;
 	state->queue_file= argv[optind];
 
-	state->max_busy= 10;
+	state->max_busy= 500;
 
 	state->slots= xzalloc(sizeof(*state->slots) * state->max_busy);
 
@@ -355,7 +355,7 @@ static void add_line(void)
 	if (state->slots[slot].cmdstate != NULL)
 		crondlog(DIE9 "no empty slot?");
 	argv[argc++]= "-O";
-	snprintf(filename, sizeof(filename), OOQD_NEW_PREFIX ".%d", slot);
+	snprintf(filename, sizeof(filename), OOQD_NEW_PREFIX);
 	argv[argc++]= filename;
 
 	argv[argc]= NULL;
@@ -442,6 +442,7 @@ static void cmddone(void *cmdstate)
 	state->slots[i].cmdstate= NULL;
 	state->curr_busy--;
 
+#if 0
 	snprintf(from_filename, sizeof(from_filename),
 		"/home/atlas/data/new/ooq.%d", i);
 	snprintf(to_filename, sizeof(to_filename),
@@ -462,6 +463,7 @@ static void cmddone(void *cmdstate)
 	{
 		post_results();
 	}
+#endif
 }
 
 static void re_post(evutil_socket_t fd UNUSED_PARAM, short what UNUSED_PARAM,

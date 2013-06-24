@@ -50,6 +50,7 @@
 #define O_RESOLV_CONF  1003
 #define O_PREPEND_PROBE_ID  1004
 #define O_EVDNS 1005
+#define O_NO_EVDNS 1006
 
 #define DNS_FLAG_RD 0x0100
 
@@ -336,6 +337,7 @@ static struct option longopts[]=
 	{ "noabuf", no_argument, NULL, 1002 },
 
 	{ "evdns", no_argument, NULL, O_EVDNS },
+	{ "noevdns", no_argument, NULL, O_NO_EVDNS },
 	{ "out-file", required_argument, NULL, 'O' },
 	{ "p_probe_id", no_argument, NULL, O_PREPEND_PROBE_ID },
 	{ NULL, }
@@ -1052,7 +1054,7 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	qry->opt_qbuf = 0; 
 	qry->opt_abuf = 1; 
 	qry->opt_rd = 0;
-	qry->opt_evdns = 0;
+	qry->opt_evdns = 1;
 	qry->opt_prepend_probe_id = 0;
 	qry->ressave = NULL;
 	qry->ressent = NULL;
@@ -1162,6 +1164,10 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 
 			case O_EVDNS:
 				qry->opt_evdns = 1;
+				break;
+
+			case O_NO_EVDNS:
+				qry->opt_evdns = 0;
 				break;
 
 			case (100000 + T_A):
