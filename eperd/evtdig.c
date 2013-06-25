@@ -75,6 +75,8 @@
 #define STATUS_TCP_CONNECTED 		1003
 #define STATUS_TCP_WRITE 		1004
 #define STATUS_NEXT_QUERY		1005
+#define STATUS_RETRANSMIT_QUERY		1006
+
 #define STATUS_FREE 			0
 
 // seems T_DNSKEY is not defined header files of lenny and sdk
@@ -188,6 +190,8 @@ struct query_state {
 	int opt_rd;
 	int opt_prepend_probe_id;
 	int opt_evdns;
+	 
+	int retry;
 
 	char * str_Atlas; 
 	u_int16_t qtype;
@@ -357,6 +361,8 @@ static void process_reply(void * arg, int nrecv, struct timeval now, int af, voi
 static void mk_dns_buff(struct query_state *qry,  u_char *packet);
 int ip_addr_cmp (u_int16_t af_a, void *a, u_int16_t af_b, void *b);
 static void udp_dns_cb(int err, struct evutil_addrinfo *ev_res, struct query_state *qry);
+static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
+static void free_qry_inst(struct query_state *qry);
 
 /* move the next functions from tdig.c */
 u_int32_t get32b (char *p);
@@ -719,22 +725,10 @@ static void tdig_send_query_callback(int unused UNUSED_PARAM, const short event 
 
 static void next_qry_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h) {
 	struct query_state *qry = h;
-	BLURT(LVL5 "next query for %s",  qry->server_name);
+	BLURT(LVL5 "next query for %s retry %d",  qry->server_name, qry->retry);
+			
 	tdig_start(qry);  
 }
-
-/* The callback to handle timeouts due to destination host unreachable condition */
-static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
-{
-	struct query_state *qry = h;
-	qry->base->timeout++;
-	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
-	buf_add(&qry->err, line, strlen(line));
-
-	BLURT(LVL5 "AAA timeout for %s ", qry->server_name);
-	printReply (qry, 0, NULL);
-	return;
-} 
 
 static void tcp_timeout_callback (int __attribute((unused)) unused, 
 		const short __attribute((unused)) event, void *s)
@@ -748,6 +742,7 @@ static void tcp_reporterr(struct tu_env *env, enum tu_err cause,
                 const char *str)
 {
 	struct query_state * qry;
+	struct timeval asap = { 0, 0 };
 	qry = ENV2QRY(env);
 
        // if (env != &state->tu_env) abort();  // Why do i need this? AA
@@ -782,7 +777,14 @@ static void tcp_reporterr(struct tu_env *env, enum tu_err cause,
                 crondlog(DIE9 "reporterr: bad cause %d", cause);
 		break;
         }
-	printReply (qry, 0, NULL);
+	if (qry->retry < 10) {
+		qry->retry++;
+		free_qry_inst(qry);
+		qry->qst = STATUS_RETRANSMIT_QUERY;
+		evtimer_add(&qry->next_qry_timer, &asap);	
+	} else {
+		printReply (qry, 0, NULL);
+	}
 }
 
 static void tcp_dnscount(struct tu_env *env, int count)
@@ -1046,6 +1048,7 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	qry->str_Atlas = NULL;
 	tdig_base->activeqry++;
 	qry->qst = 0;
+	qry->retry  = 0;
 	qry->wire_size = 0;
 	qry->triptime = 0;
 	qry->opt_edns0 = 512; 
@@ -1449,7 +1452,8 @@ void tdig_start (struct query_state *qry)
 	switch(qry->qst)
 	{
 		case STATUS_NEXT_QUERY :
-		case  STATUS_FREE :
+		case STATUS_FREE :
+		case STATUS_RETRANSMIT_QUERY:
 			break;
 		default:
 			printErrorQuick(qry);
@@ -1685,6 +1689,29 @@ static void free_qry_inst(struct query_state *qry)
 	
 }
 
+/* The callback to handle timeouts due to destination host unreachable condition */
+static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
+{
+	struct timeval asap = { 0, 0 };
+	struct query_state *qry = h;
+	qry->base->timeout++;
+	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
+	buf_add(&qry->err, line, strlen(line));
+
+	BLURT(LVL5 "AAA timeout for %s ", qry->server_name);
+	
+	if (qry->retry < 10) {
+		qry->retry++;
+		free_qry_inst(qry);
+		qry->qst = STATUS_RETRANSMIT_QUERY;
+		evtimer_add(&qry->next_qry_timer, &asap);	
+	} else {
+		printReply (qry, 0, NULL);
+	}
+
+	return;
+} 
+
 
 static int tdig_delete(void *state)
 {
@@ -1862,8 +1889,12 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 		JC;
 		JS_NC(qbuf, qry->qbuf.buf );
 	} 
-
       
+	if(qry->retry) {
+		JS1(retry, %d,  qry->retry);
+	}
+
+
 	if(result)
 	{
 		dnsR = (struct DNS_HEADER*) result;
@@ -1995,7 +2026,8 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 		}
 
 		fprintf (fh , " }"); //result
-	} 
+	}
+
 	if(qry->err.size) 
 	{
 		line[0]  = '\0';
