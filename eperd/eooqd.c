@@ -99,7 +99,7 @@ int eooqd_main(int argc, char *argv[])
 	state->atlas_id= atlas_id;
 	state->queue_file= argv[optind];
 
-	state->max_busy= 500;
+	state->max_busy= 50;
 
 	state->slots= xzalloc(sizeof(*state->slots) * state->max_busy);
 
