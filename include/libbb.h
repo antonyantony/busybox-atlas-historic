@@ -483,9 +483,9 @@ int xmkstemp(char *template) FAST_FUNC;
 off_t fdlength(int fd) FAST_FUNC;
 
 uoff_t FAST_FUNC get_volume_size_in_bytes(int fd,
-                const char *override,
-                unsigned override_units,
-                int extend);
+		const char *override,
+		unsigned override_units,
+		int extend);
 
 void xpipe(int filedes[2]) FAST_FUNC;
 /* In this form code with pipes is much more readable */
@@ -678,6 +678,13 @@ const char* FAST_FUNC printable_string(uni_stat_t *stats, const char *str);
  * else it is printed as-is (except for ch = 0x9b) */
 enum { PRINTABLE_META = 0x100 };
 void fputc_printable(int ch, FILE *file) FAST_FUNC;
+/* Return a string that is the printable representation of character ch.
+ * Buffer must hold at least four characters. */
+enum {
+	VISIBLE_ENDLINE   = 1 << 0,
+	VISIBLE_SHOW_TABS = 1 << 1,
+};
+void visible(unsigned ch, char *buf, int flags) FAST_FUNC;
 
 /* dmalloc will redefine these to it's own implementation. It is safe
  * to have the prototypes here unconditionally.  */
@@ -808,8 +815,8 @@ char *itoa(int n) FAST_FUNC;
 char *utoa_to_buf(unsigned n, char *buf, unsigned buflen) FAST_FUNC;
 char *itoa_to_buf(int n, char *buf, unsigned buflen) FAST_FUNC;
 /* Intelligent formatters of bignums */
-void smart_ulltoa4(unsigned long long ul, char buf[4], const char *scale) FAST_FUNC;
-void smart_ulltoa5(unsigned long long ul, char buf[5], const char *scale) FAST_FUNC;
+char *smart_ulltoa4(unsigned long long ul, char buf[4], const char *scale) FAST_FUNC;
+char *smart_ulltoa5(unsigned long long ul, char buf[5], const char *scale) FAST_FUNC;
 /* If block_size == 0, display size without fractional part,
  * else display (size * block_size) with one decimal digit.
  * If display_unit == 0, show value no bigger than 1024 with suffix (K,M,G...),
@@ -832,6 +839,9 @@ struct suffix_mult {
 	char suffix[4];
 	unsigned mult;
 };
+extern const struct suffix_mult bkm_suffixes[];
+#define km_suffixes (bkm_suffixes + 1)
+
 #include "xatonum.h"
 /* Specialized: */
 
@@ -1137,6 +1147,7 @@ struct hwtype {
 };
 extern smallint interface_opt_a;
 int display_interfaces(char *ifname) FAST_FUNC;
+int in_ether(const char *bufp, struct sockaddr *sap) FAST_FUNC;
 #if ENABLE_FEATURE_HWIB
 int in_ib(const char *bufp, struct sockaddr *sap) FAST_FUNC;
 #else

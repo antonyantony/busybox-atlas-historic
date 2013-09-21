@@ -1389,7 +1389,7 @@ static void restore_G_args(save_arg_t *sv, char **argv)
  * are set to '' (ignore) are NOT reset to defaults. We do the same.
  *
  * Problem: the above approach makes it unwieldy to catch signals while
- * we are in read builtin, of while we read commands from stdin:
+ * we are in read builtin, or while we read commands from stdin:
  * masked signals are not visible!
  *
  * New implementation
@@ -2044,7 +2044,10 @@ static void get_user_input(struct in_str *i)
 		 * _during_ shell execution, not only if it was set when
 		 * shell was started. Therefore, re-check LANG every time:
 		 */
-		reinit_unicode(get_local_var_value("LANG"));
+		const char *s = get_local_var_value("LC_ALL");
+		if (!s) s = get_local_var_value("LC_CTYPE");
+		if (!s) s = get_local_var_value("LANG");
+		reinit_unicode(s);
 
 		G.flag_SIGINT = 0;
 		/* buglet: SIGINT will not make new prompt to appear _at once_,
