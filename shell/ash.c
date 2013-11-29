@@ -2286,7 +2286,7 @@ unsetvar(const char *s)
 			free(vp);
 			INT_ON;
 		} else {
-			setvar(s, 0, 0);
+			setvar2(s, 0);
 			vp->flags &= ~VEXPORT;
 		}
  ok:
@@ -6339,7 +6339,7 @@ subevalvar(char *p, char *varname, int strloc, int subtype,
 
 	switch (subtype) {
 	case VSASSIGN:
-		setvar(varname, startp, 0);
+		setvar2(varname, startp);
 		amount = startp - expdest;
 		STADJUST(amount, expdest);
 		return startp;
@@ -8554,7 +8554,7 @@ evalfor(union node *n, int flags)
 	loopnest++;
 	flags &= EV_TESTED;
 	for (sp = arglist.list; sp; sp = sp->next) {
-		setvar(n->nfor.var, sp->text, 0);
+		setvar2(n->nfor.var, sp->text);
 		evaltree(n->nfor.body, flags);
 		if (evalskip) {
 			if (evalskip == SKIPCONT && --skipcount <= 0) {
@@ -9451,7 +9451,7 @@ evalcommand(union node *cmd, int flags)
 		 * '_' in 'vi' command mode during line editing...
 		 * However I implemented that within libedit itself.
 		 */
-		setvar("_", lastarg, 0);
+		setvar2("_", lastarg);
 	}
 	popstackmark(&smark);
 }
@@ -12273,7 +12273,6 @@ dotcmd(int argc, char **argv)
 	 * bash returns exitcode 1 instead.
 	 */
 	fullname = find_dot_file(argv[1]);
-
 	argv += 2;
 	argc -= 2;
 	if (argc) { /* argc > 0, argv[0] != NULL */
@@ -13012,8 +13011,11 @@ init(void)
 			}
 		}
 
-		setvar("PPID", utoa(getppid()), 0);
-
+		setvar2("PPID", utoa(getppid()));
+#if ENABLE_ASH_BASH_COMPAT
+		p = lookupvar("SHLVL");
+		setvar2("SHLVL", utoa(p ? atoi(p) + 1 : 1));
+#endif
 		p = lookupvar("PWD");
 		if (p) {
 			if (*p != '/' || stat(p, &st1) || stat(".", &st2)
@@ -13267,7 +13269,7 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
 				hp = lookupvar("HOME");
 				if (hp) {
 					hp = concat_path_file(hp, ".ash_history");
-					setvar("HISTFILE", hp, 0);
+					setvar2("HISTFILE", hp);
 					free((char*)hp);
 					hp = lookupvar("HISTFILE");
 				}
