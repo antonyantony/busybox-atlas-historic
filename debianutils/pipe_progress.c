@@ -4,11 +4,8 @@
  *
  * Copyright (C) 2003 by Rob Landley <rob@landley.net>, Joey Hess
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
-
-//usage:#define pipe_progress_trivial_usage NOUSAGE_STR
-//usage:#define pipe_progress_full_usage ""
 
 #include "libbb.h"
 
@@ -20,20 +17,23 @@
 int pipe_progress_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int pipe_progress_main(int argc UNUSED_PARAM, char **argv UNUSED_PARAM)
 {
-	char buf[PIPE_PROGRESS_SIZE];
+	RESERVE_CONFIG_BUFFER(buf, PIPE_PROGRESS_SIZE);
 	time_t t = time(NULL);
-	int len;
+	size_t len;
 
-	while ((len = safe_read(STDIN_FILENO, buf, PIPE_PROGRESS_SIZE)) > 0) {
+	while ((len = fread(buf, 1, PIPE_PROGRESS_SIZE, stdin)) > 0) {
 		time_t new_time = time(NULL);
 		if (new_time != t) {
 			t = new_time;
-			bb_putchar_stderr('.');
+			fputc('.', stderr);
 		}
-		full_write(STDOUT_FILENO, buf, len);
+		fwrite(buf, len, 1, stdout);
 	}
 
-	bb_putchar_stderr('\n');
+	fputc('\n', stderr);
+
+	if (ENABLE_FEATURE_CLEAN_UP)
+		RELEASE_CONFIG_BUFFER(buf);
 
 	return 0;
 }

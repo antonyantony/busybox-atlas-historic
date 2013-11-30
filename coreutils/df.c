@@ -5,7 +5,7 @@
  * Copyright (C) 1999-2004 by Erik Andersen <andersen@codepoet.org>
  * based on original code by (I think) Bruce Perens <bruce@pixar.com>.
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
 /* BB_AUDIT SUSv3 _NOT_ compliant -- option -t missing. */
@@ -22,44 +22,9 @@
  * Implement -P and -B; better coreutils compat; cleanup
  */
 
-//usage:#define df_trivial_usage
-//usage:	"[-Pk"
-//usage:	IF_FEATURE_HUMAN_READABLE("mh")
-//usage:	IF_FEATURE_DF_FANCY("ai] [-B SIZE")
-//usage:	"] [FILESYSTEM]..."
-//usage:#define df_full_usage "\n\n"
-//usage:       "Print filesystem usage statistics\n"
-//usage:     "\n	-P	POSIX output format"
-//usage:     "\n	-k	1024-byte blocks (default)"
-//usage:	IF_FEATURE_HUMAN_READABLE(
-//usage:     "\n	-m	1M-byte blocks"
-//usage:     "\n	-h	Human readable (e.g. 1K 243M 2G)"
-//usage:	)
-//usage:	IF_FEATURE_DF_FANCY(
-//usage:     "\n	-a	Show all filesystems"
-//usage:     "\n	-i	Inodes"
-//usage:     "\n	-B SIZE	Blocksize"
-//usage:	)
-//usage:
-//usage:#define df_example_usage
-//usage:       "$ df\n"
-//usage:       "Filesystem           1K-blocks      Used Available Use% Mounted on\n"
-//usage:       "/dev/sda3              8690864   8553540    137324  98% /\n"
-//usage:       "/dev/sda1                64216     36364     27852  57% /boot\n"
-//usage:       "$ df /dev/sda3\n"
-//usage:       "Filesystem           1K-blocks      Used Available Use% Mounted on\n"
-//usage:       "/dev/sda3              8690864   8553540    137324  98% /\n"
-//usage:       "$ POSIXLY_CORRECT=sure df /dev/sda3\n"
-//usage:       "Filesystem         512B-blocks      Used Available Use% Mounted on\n"
-//usage:       "/dev/sda3             17381728  17107080    274648  98% /\n"
-//usage:       "$ POSIXLY_CORRECT=yep df -P /dev/sda3\n"
-//usage:       "Filesystem          512-blocks      Used Available Capacity Mounted on\n"
-//usage:       "/dev/sda3             17381728  17107080    274648      98% /\n"
-
 #include <mntent.h>
 #include <sys/vfs.h>
 #include "libbb.h"
-#include "unicode.h"
 
 #if !ENABLE_FEATURE_HUMAN_READABLE
 static unsigned long kscale(unsigned long b, unsigned long bs)
@@ -69,7 +34,7 @@ static unsigned long kscale(unsigned long b, unsigned long bs)
 #endif
 
 int df_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-int df_main(int argc UNUSED_PARAM, char **argv)
+int df_main(int argc, char **argv)
 {
 	unsigned long blocks_used;
 	unsigned blocks_percent_used;
@@ -79,6 +44,8 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 	FILE *mount_table;
 	struct mntent *mount_entry;
 	struct statfs s;
+	static const char ignored_mounts[] ALIGN1 =
+	  "rootfs\0";
 
 	enum {
 		OPT_KILO  = (1 << 0),
@@ -86,13 +53,11 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 		OPT_ALL   = (1 << 2) * ENABLE_FEATURE_DF_FANCY,
 		OPT_INODE = (1 << 3) * ENABLE_FEATURE_DF_FANCY,
 		OPT_BSIZE = (1 << 4) * ENABLE_FEATURE_DF_FANCY,
-		OPT_HUMAN = (1 << (2 + 3*ENABLE_FEATURE_DF_FANCY)) * ENABLE_FEATURE_HUMAN_READABLE,
-		OPT_MEGA  = (1 << (3 + 3*ENABLE_FEATURE_DF_FANCY)) * ENABLE_FEATURE_HUMAN_READABLE,
+		OPT_HUMAN = (1 << 5) * ENABLE_FEATURE_HUMAN_READABLE,
+		OPT_MEGA  = (1 << 6) * ENABLE_FEATURE_HUMAN_READABLE,
 	};
 	const char *disp_units_hdr = NULL;
 	char *chp;
-
-	init_unicode();
 
 #if ENABLE_FEATURE_HUMAN_READABLE && ENABLE_FEATURE_DF_FANCY
 	opt_complementary = "k-mB:m-Bk:B-km";
@@ -100,9 +65,9 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 	opt_complementary = "k-m:m-k";
 #endif
 	opt = getopt32(argv, "kP"
-			IF_FEATURE_DF_FANCY("aiB:")
-			IF_FEATURE_HUMAN_READABLE("hm")
-			IF_FEATURE_DF_FANCY(, &chp));
+			USE_FEATURE_DF_FANCY("aiB:")
+			USE_FEATURE_HUMAN_READABLE("hm")
+			USE_FEATURE_DF_FANCY(, &chp));
 	if (opt & OPT_MEGA)
 		df_disp_hr = 1024*1024;
 
@@ -110,9 +75,9 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 		df_disp_hr = xatoul_range(chp, 1, ULONG_MAX); /* disallow 0 */
 
 	/* From the manpage of df from coreutils-6.10:
-	 * Disk space is shown in 1K blocks by default, unless the environment
-	 * variable POSIXLY_CORRECT is set, in which case 512-byte blocks are used.
-	 */
+	   Disk space is shown in 1K blocks by default, unless the environment
+	   variable POSIXLY_CORRECT is set, in which case 512-byte blocks are used.
+	*/
 	if (getenv("POSIXLY_CORRECT")) /* TODO - a new libbb function? */
 		df_disp_hr = 512;
 
@@ -126,10 +91,7 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 	if (disp_units_hdr == NULL) {
 #if ENABLE_FEATURE_HUMAN_READABLE
 		disp_units_hdr = xasprintf("%s-blocks",
-			/* print df_disp_hr, show no fractionals,
-			 * use suffixes if OPT_POSIX is set in opt */
-			make_human_readable_str(df_disp_hr, 0, !!(opt & OPT_POSIX))
-		);
+			make_human_readable_str(df_disp_hr, 0, !!(opt & OPT_POSIX)));
 #else
 		disp_units_hdr = xasprintf("%lu-blocks", df_disp_hr);
 #endif
@@ -139,7 +101,7 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 
 	mount_table = NULL;
 	argv += optind;
-	if (!argv[0]) {
+	if (optind >= argc) {
 		mount_table = setmntent(bb_path_mtab_file, "r");
 		if (!mount_table)
 			bb_perror_msg_and_die(bb_path_mtab_file);
@@ -159,10 +121,10 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 			mount_point = *argv++;
 			if (!mount_point)
 				break;
-			mount_entry = find_mount_point(mount_point, 1);
+			mount_entry = find_mount_point(mount_point, bb_path_mtab_file);
 			if (!mount_entry) {
 				bb_error_msg("%s: can't find mount point", mount_point);
- set_error:
+ SET_ERROR:
 				status = EXIT_FAILURE;
 				continue;
 			}
@@ -173,7 +135,7 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 
 		if (statfs(mount_point, &s) != 0) {
 			bb_simple_perror_msg(mount_point);
-			goto set_error;
+			goto SET_ERROR;
 		}
 
 		if ((s.f_blocks > 0) || !mount_table || (opt & OPT_ALL)) {
@@ -193,60 +155,41 @@ int df_main(int argc UNUSED_PARAM, char **argv)
 						) / (blocks_used + s.f_bavail);
 			}
 
-			/* GNU coreutils 6.10 skips certain mounts, try to be compatible.  */
-			if (ENABLE_FEATURE_SKIP_ROOTFS && strcmp(device, "rootfs") == 0)
+			/* GNU coreutils 6.10 skip certain mounts, try to be compatible.  */
+			if (index_in_strings(device, ignored_mounts) != -1)
 				continue;
 
 #ifdef WHY_WE_DO_IT_FOR_DEV_ROOT_ONLY
+/* ... and also this is the only user of find_block_device */
 			if (strcmp(device, "/dev/root") == 0) {
 				/* Adjusts device to be the real root device,
-				 * or leaves device alone if it can't find it */
+				* or leaves device alone if it can't find it */
 				device = find_block_device("/");
 				if (!device) {
-					goto set_error;
+					goto SET_ERROR;
 				}
 			}
 #endif
 
-#if ENABLE_UNICODE_SUPPORT
-			{
-				uni_stat_t uni_stat;
-				char *uni_dev = unicode_conv_to_printable(&uni_stat, device);
-				if (uni_stat.unicode_width > 20 && !(opt & OPT_POSIX)) {
-					printf("%s\n%20s", uni_dev, "");
-				} else {
-					printf("%s%*s", uni_dev, 20 - (int)uni_stat.unicode_width, "");
-				}
-				free(uni_dev);
-			}
-#else
-			if (printf("\n%-20s" + 1, device) > 20 && !(opt & OPT_POSIX))
-				printf("\n%-20s", "");
-#endif
-
+			if (printf("\n%-20s" + 1, device) > 20)
+				    printf("\n%-20s", "");
 #if ENABLE_FEATURE_HUMAN_READABLE
 			printf(" %9s ",
-				/* f_blocks x f_bsize / df_disp_hr, show one fractional,
-				 * use suffixes if df_disp_hr == 0 */
 				make_human_readable_str(s.f_blocks, s.f_bsize, df_disp_hr));
 
 			printf(" %9s " + 1,
-				/* EXPR x f_bsize / df_disp_hr, show one fractional,
-				 * use suffixes if df_disp_hr == 0 */
 				make_human_readable_str((s.f_blocks - s.f_bfree),
 						s.f_bsize, df_disp_hr));
 
 			printf("%9s %3u%% %s\n",
-				/* f_bavail x f_bsize / df_disp_hr, show one fractional,
-				 * use suffixes if df_disp_hr == 0 */
-				make_human_readable_str(s.f_bavail, s.f_bsize, df_disp_hr),
-				blocks_percent_used, mount_point);
+					make_human_readable_str(s.f_bavail, s.f_bsize, df_disp_hr),
+					blocks_percent_used, mount_point);
 #else
 			printf(" %9lu %9lu %9lu %3u%% %s\n",
-				kscale(s.f_blocks, s.f_bsize),
-				kscale(s.f_blocks - s.f_bfree, s.f_bsize),
-				kscale(s.f_bavail, s.f_bsize),
-				blocks_percent_used, mount_point);
+					kscale(s.f_blocks, s.f_bsize),
+					kscale(s.f_blocks - s.f_bfree, s.f_bsize),
+					kscale(s.f_bavail, s.f_bsize),
+					blocks_percent_used, mount_point);
 #endif
 		}
 	}

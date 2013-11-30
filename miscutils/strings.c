@@ -2,31 +2,23 @@
 /*
  * strings implementation for busybox
  *
- * Copyright 2003 Tito Ragusa <farmatito@tiscali.it>
+ * Copyright Tito Ragusa <farmatito@tiscali.it>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under the GPL v2 or later, see the file LICENSE in this tarball.
  */
-
-//usage:#define strings_trivial_usage
-//usage:       "[-afo] [-n LEN] [FILE]..."
-//usage:#define strings_full_usage "\n\n"
-//usage:       "Display printable strings in a binary file\n"
-//usage:     "\n	-a	Scan whole file (default)"
-//usage:     "\n	-f	Precede strings with filenames"
-//usage:     "\n	-n LEN	At least LEN characters form a string (default 4)"
-//usage:     "\n	-o	Precede strings with decimal offsets"
 
 #include "libbb.h"
 
-#define WHOLE_FILE    1
-#define PRINT_NAME    2
-#define PRINT_OFFSET  4
-#define SIZE          8
+#define WHOLE_FILE		1
+#define PRINT_NAME		2
+#define PRINT_OFFSET	4
+#define SIZE			8
 
 int strings_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int strings_main(int argc UNUSED_PARAM, char **argv)
 {
 	int n, c, status = EXIT_SUCCESS;
+	unsigned opt;
 	unsigned count;
 	off_t offset;
 	FILE *file;
@@ -34,7 +26,7 @@ int strings_main(int argc UNUSED_PARAM, char **argv)
 	const char *fmt = "%s: ";
 	const char *n_arg = "4";
 
-	getopt32(argv, "afon:", &n_arg);
+	opt = getopt32(argv, "afon:", &n_arg);
 	/* -a is our default behaviour */
 	/*argc -= optind;*/
 	argv += optind;
@@ -58,16 +50,16 @@ int strings_main(int argc UNUSED_PARAM, char **argv)
 		count = 0;
 		do {
 			c = fgetc(file);
-			if (isprint_asciionly(c) || c == '\t') {
+			if (isprint(c) || c == '\t') {
 				if (count > n) {
 					bb_putchar(c);
 				} else {
 					string[count] = c;
 					if (count == n) {
-						if (option_mask32 & PRINT_NAME) {
+						if (opt & PRINT_NAME) {
 							printf(fmt, *argv);
 						}
-						if (option_mask32 & PRINT_OFFSET) {
+						if (opt & PRINT_OFFSET) {
 							printf("%7"OFF_FMT"o ", offset - n);
 						}
 						fputs(string, stdout);

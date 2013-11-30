@@ -12,7 +12,6 @@
 #include <event2/dns.h>
 #include <event2/event.h>
 #include <event2/event_struct.h>
-#include "atlas_probe.h"
 
 #include "eperd.h"
 #include "tcputil.h"

@@ -14,6 +14,8 @@
 #define LKC_DIRECT_LINK
 #include "lkc.h"
 
+#include "zconf.hash.c"
+
 #define printd(mask, fmt...) if (cdebug & (mask)) printf(fmt)
 
 #define PRINTD		0x0001
@@ -96,10 +98,6 @@ static struct menu *current_menu, *current_entry;
 	if (current_menu == $$)
 		menu_end_menu();
 } if_entry menu_entry choice_entry
-
-%{
-#include "zconf.hash.c"
-%}
 
 %%
 input: stmt_list;
@@ -473,7 +471,7 @@ void conf_parse(const char *name)
 	menu_finalize(&rootmenu);
 	for_all_symbols(i, sym) {
 		sym_check_deps(sym);
-	}
+        }
 
 	sym_change_count = 1;
 }

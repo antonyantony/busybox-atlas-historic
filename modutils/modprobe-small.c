@@ -5,17 +5,11 @@
  * Copyright (c) 2008 Vladimir Dronnikov
  * Copyright (c) 2008 Bernhard Reutner-Fischer (initial depmod code)
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * Licensed under GPLv2, see file LICENSE in this tarball for details.
  */
 
-//applet:IF_MODPROBE_SMALL(APPLET(modprobe, BB_DIR_SBIN, BB_SUID_DROP))
-//applet:IF_MODPROBE_SMALL(APPLET_ODDNAME(depmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
-//applet:IF_MODPROBE_SMALL(APPLET_ODDNAME(insmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
-//applet:IF_MODPROBE_SMALL(APPLET_ODDNAME(lsmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
-//applet:IF_MODPROBE_SMALL(APPLET_ODDNAME(rmmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
-
 #include "libbb.h"
-/* After libbb.h, since it needs sys/types.h on some systems */
+
 #include <sys/utsname.h> /* uname() */
 #include <fnmatch.h>
 
@@ -24,13 +18,10 @@ extern int delete_module(const char *module, unsigned flags);
 extern int query_module(const char *name, int which, void *buf, size_t bufsize, size_t *ret);
 
 
-#if 1
-# define dbg1_error_msg(...) ((void)0)
-# define dbg2_error_msg(...) ((void)0)
-#else
-# define dbg1_error_msg(...) bb_error_msg(__VA_ARGS__)
-# define dbg2_error_msg(...) bb_error_msg(__VA_ARGS__)
-#endif
+#define dbg1_error_msg(...) ((void)0)
+#define dbg2_error_msg(...) ((void)0)
+//#define dbg1_error_msg(...) bb_error_msg(__VA_ARGS__)
+//#define dbg2_error_msg(...) bb_error_msg(__VA_ARGS__)
 
 #define DEPFILE_BB CONFIG_DEFAULT_DEPMOD_FILE".bb"
 
@@ -53,13 +44,11 @@ struct globals {
 	char *module_load_options;
 	smallint dep_bb_seen;
 	smallint wrote_dep_bb_ok;
-	unsigned module_count;
+	int module_count;
 	int module_found_idx;
-	unsigned stringbuf_idx;
-	unsigned stringbuf_size;
-	char *stringbuf; /* some modules have lots of stuff */
+	int stringbuf_idx;
+	char stringbuf[32 * 1024]; /* some modules have lots of stuff */
 	/* for example, drivers/media/video/saa7134/saa7134.ko */
-	/* therefore having a fixed biggish buffer is not wise */
 };
 #define G (*ptr_to_globals)
 #define modinfo             (G.modinfo            )
@@ -69,35 +58,31 @@ struct globals {
 #define module_found_idx    (G.module_found_idx   )
 #define module_load_options (G.module_load_options)
 #define stringbuf_idx       (G.stringbuf_idx      )
-#define stringbuf_size      (G.stringbuf_size     )
 #define stringbuf           (G.stringbuf          )
 #define INIT_G() do { \
 	SET_PTR_TO_GLOBALS(xzalloc(sizeof(G))); \
 } while (0)
 
-static void append(const char *s)
-{
-	unsigned len = strlen(s);
-	if (stringbuf_idx + len + 15 > stringbuf_size) {
-		stringbuf_size = stringbuf_idx + len + 127;
-		dbg2_error_msg("grow stringbuf to %u", stringbuf_size);
-		stringbuf = xrealloc(stringbuf, stringbuf_size);
-	}
-	memcpy(stringbuf + stringbuf_idx, s, len);
-	stringbuf_idx += len;
-}
 
 static void appendc(char c)
 {
-	/* We appendc() only after append(), + 15 trick in append()
-	 * makes it unnecessary to check for overflow here */
-	stringbuf[stringbuf_idx++] = c;
+	if (stringbuf_idx < sizeof(stringbuf))
+		stringbuf[stringbuf_idx++] = c;
 }
 
 static void bksp(void)
 {
 	if (stringbuf_idx)
 		stringbuf_idx--;
+}
+
+static void append(const char *s)
+{
+	size_t len = strlen(s);
+	if (stringbuf_idx + len < sizeof(stringbuf)) {
+		memcpy(stringbuf + stringbuf_idx, s, len);
+		stringbuf_idx += len;
+	}
 }
 
 static void reset_stringbuf(void)
@@ -107,7 +92,7 @@ static void reset_stringbuf(void)
 
 static char* copy_stringbuf(void)
 {
-	char *copy = xzalloc(stringbuf_idx + 1); /* terminating NUL */
+	char *copy = xmalloc(stringbuf_idx);
 	return memcpy(copy, stringbuf, stringbuf_idx);
 }
 
@@ -205,7 +190,6 @@ static void parse_module(module_info *info, const char *pathname)
 	/* Read (possibly compressed) module */
 	len = 64 * 1024 * 1024; /* 64 Mb at most */
 	module_image = xmalloc_open_zipped_read_close(pathname, &len);
-	/* module_image == NULL is ok here, find_keyword handles it */
 //TODO: optimize redundant module body reads
 
 	/* "alias1 symbol:sym1 alias2 symbol:sym2" */
@@ -232,8 +216,8 @@ static void parse_module(module_info *info, const char *pathname)
 		pos = (ptr - module_image);
 	}
 	bksp(); /* remove last ' ' */
+	appendc('\0');
 	info->aliases = copy_stringbuf();
-	replace(info->aliases, '-', '_');
 
 	/* "dependency1 depandency2" */
 	reset_stringbuf();
@@ -244,6 +228,7 @@ static void parse_module(module_info *info, const char *pathname)
 		dbg2_error_msg("dep:'%s'", ptr);
 		append(ptr);
 	}
+	appendc('\0');
 	info->deps = copy_stringbuf();
 
 	free(module_image);
@@ -329,7 +314,6 @@ static int load_dep_bb(void)
 
 	while ((line = xmalloc_fgetline(fp)) != NULL) {
 		char* space;
-		char* linebuf;
 		int cur;
 
 		if (!line[0]) {
@@ -344,8 +328,7 @@ static int load_dep_bb(void)
 		if (*space)
 			*space++ = '\0';
 		modinfo[cur].aliases = space;
-		linebuf = xmalloc_fgetline(fp);
-		modinfo[cur].deps = linebuf ? linebuf : xzalloc(1);
+		modinfo[cur].deps = xmalloc_fgetline(fp) ? : xzalloc(1);
 		if (modinfo[cur].deps[0]) {
 			/* deps are not "", so next line must be empty */
 			line = xmalloc_fgetline(fp);
@@ -394,7 +377,11 @@ static void write_out_dep_bb(int fd)
 	FILE *fp;
 
 	/* We want good error reporting. fdprintf is not good enough. */
-	fp = xfdopen_for_write(fd);
+	fp = fdopen(fd, "w");
+	if (!fp) {
+		close(fd);
+		goto err;
+	}
 	i = 0;
 	while (modinfo[i].pathname) {
 		fprintf(fp, "%s%s%s\n" "%s%s\n",
@@ -412,7 +399,7 @@ static void write_out_dep_bb(int fd)
 
 	if (rename(DEPFILE_BB".new", DEPFILE_BB) != 0) {
  err:
-		bb_perror_msg("can't create '%s'", DEPFILE_BB);
+		bb_perror_msg("can't create %s", DEPFILE_BB);
 		unlink(DEPFILE_BB".new");
 	} else {
  ok:
@@ -579,40 +566,26 @@ static void process_module(char *name, const char *cmdline_options)
 		info = find_alias(name);
 	}
 
-// Problem here: there can be more than one module
-// for the given alias. For example,
-// "pci:v00008086d00007010sv00000000sd00000000bc01sc01i80" matches
-// ata_piix because it has an alias "pci:v00008086d00007010sv*sd*bc*sc*i*"
-// and ata_generic, it has an alias "alias=pci:v*d*sv*sd*bc01sc01i*"
-// Standard modprobe would load them both.
-// In this code, find_alias() returns only the first matching module.
-
 	/* rmmod? unload it by name */
 	if (is_rmmod) {
-		if (delete_module(name, O_NONBLOCK | O_EXCL) != 0) {
-			if (!(option_mask32 & OPT_q))
-				bb_perror_msg("remove '%s'", name);
+		if (delete_module(name, O_NONBLOCK | O_EXCL) != 0
+		 && !(option_mask32 & OPT_q)
+		) {
+			bb_perror_msg("remove '%s'", name);
 			goto ret;
 		}
-
-		if (applet_name[0] == 'r') {
-			/* rmmod: do not remove dependencies, exit */
-			goto ret;
-		}
-
-		/* modprobe -r: we do not stop here -
+		/* N.B. we do not stop here -
 		 * continue to unload modules on which the module depends:
 		 * "-r --remove: option causes modprobe to remove a module.
 		 * If the modules it depends on are also unused, modprobe
-		 * will try to remove them, too."
-		 */
+		 * will try to remove them, too." */
 	}
 
 	if (!info) {
 		/* both dirscan and find_alias found nothing */
-		if (!is_rmmod && applet_name[0] != 'd') /* it wasn't rmmod or depmod */
+		if (applet_name[0] != 'd') /* it wasn't depmod */
 			bb_error_msg("module '%s' not found", name);
-//TODO: _and_die()? or should we continue (un)loading modules listed on cmdline?
+//TODO: _and_die()?
 		goto ret;
 	}
 
@@ -683,7 +656,7 @@ depmod -[aA] [-n -e -v -q -V -r -u]
       [-b basedirectory] [forced_version]
 depmod [-n -e -v -q -r -u] [-F kernelsyms] module1.ko module2.ko ...
 If no arguments (except options) are given, "depmod -a" is assumed.
-depmod will output a dependency list suitable for the modprobe utility.
+depmod will output a dependancy list suitable for the modprobe utility.
 Options:
     -a, --all           Probe all modules
     -A, --quick         Only does the work if there's a new module
@@ -701,67 +674,12 @@ The following options are useful for people managing distributions:
                         Use the file instead of the current kernel symbols
 */
 
-//usage:#if ENABLE_MODPROBE_SMALL
-
-//// Note: currently, help system shows modprobe --help text for all aliased cmds
-//// (see APPLET_ODDNAME macro definition).
-//// All other help texts defined below are not used. FIXME?
-
-//usage:#define depmod_trivial_usage NOUSAGE_STR
-//usage:#define depmod_full_usage ""
-
-//usage:#define lsmod_trivial_usage
-//usage:       ""
-//usage:#define lsmod_full_usage "\n\n"
-//usage:       "List the currently loaded kernel modules"
-
-//usage:#define insmod_trivial_usage
-//usage:	IF_FEATURE_2_4_MODULES("[OPTIONS] MODULE ")
-//usage:	IF_NOT_FEATURE_2_4_MODULES("FILE ")
-//usage:	"[SYMBOL=VALUE]..."
-//usage:#define insmod_full_usage "\n\n"
-//usage:       "Load the specified kernel modules into the kernel"
-//usage:	IF_FEATURE_2_4_MODULES( "\n"
-//usage:     "\n	-f	Force module to load into the wrong kernel version"
-//usage:     "\n	-k	Make module autoclean-able"
-//usage:     "\n	-v	Verbose"
-//usage:     "\n	-q	Quiet"
-//usage:     "\n	-L	Lock: prevent simultaneous loads"
-//usage:	IF_FEATURE_INSMOD_LOAD_MAP(
-//usage:     "\n	-m	Output load map to stdout"
-//usage:	)
-//usage:     "\n	-x	Don't export externs"
-//usage:	)
-
-//usage:#define rmmod_trivial_usage
-//usage:       "[-wfa] [MODULE]..."
-//usage:#define rmmod_full_usage "\n\n"
-//usage:       "Unload kernel modules\n"
-//usage:     "\n	-w	Wait until the module is no longer used"
-//usage:     "\n	-f	Force unload"
-//usage:     "\n	-a	Remove all unused modules (recursively)"
-//usage:
-//usage:#define rmmod_example_usage
-//usage:       "$ rmmod tulip\n"
-
-//usage:#define modprobe_trivial_usage
-//usage:	"[-qfwrsv] MODULE [symbol=value]..."
-//usage:#define modprobe_full_usage "\n\n"
-//usage:       "	-r	Remove MODULE (stacks) or do autoclean"
-//usage:     "\n	-q	Quiet"
-//usage:     "\n	-v	Verbose"
-//usage:     "\n	-f	Force"
-//usage:     "\n	-w	Wait for unload"
-//usage:     "\n	-s	Report via syslog instead of stderr"
-
-//usage:#endif
-
 int modprobe_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int modprobe_main(int argc UNUSED_PARAM, char **argv)
 {
 	struct utsname uts;
 	char applet0 = applet_name[0];
-	IF_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE(char *options;)
+	USE_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE(char *options;)
 
 	/* are we lsmod? -> just dump /proc/modules */
 	if ('l' == applet0) {
@@ -816,7 +734,7 @@ int modprobe_main(int argc UNUSED_PARAM, char **argv)
 	opt_complementary = "-1";
 	/* only -q (quiet) and -r (rmmod),
 	 * the rest are accepted and ignored (compat) */
-	getopt32(argv, "qrfsvwb");
+	getopt32(argv, "qrfsvw");
 	argv += optind;
 
 	/* are we rmmod? -> simulate modprobe -r */
@@ -853,17 +771,13 @@ int modprobe_main(int argc UNUSED_PARAM, char **argv)
 		void *map;
 
 		len = MAXINT(ssize_t);
-		map = xmalloc_open_zipped_read_close(*argv, &len);
-		if (!map)
-			bb_perror_msg_and_die("can't read '%s'", *argv);
+		map = xmalloc_xopen_read_close(*argv, &len);
 		if (init_module(map, len,
-			IF_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE(options ? options : "")
-			IF_NOT_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE("")
-			) != 0
-		) {
-			bb_error_msg_and_die("can't insert '%s': %s",
+			USE_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE(options ? options : "")
+			SKIP_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE("")
+				) != 0)
+			bb_error_msg_and_die("cannot insert '%s': %s",
 					*argv, moderror(errno));
-		}
 		return 0;
 	}
 
@@ -873,11 +787,11 @@ int modprobe_main(int argc UNUSED_PARAM, char **argv)
 	/* Load/remove modules.
 	 * Only rmmod loops here, modprobe has only argv[0] */
 	do {
-		process_module(*argv, options);
-	} while (*++argv);
+		process_module(*argv++, options);
+	} while (*argv);
 
 	if (ENABLE_FEATURE_CLEAN_UP) {
-		IF_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE(free(options);)
+		USE_FEATURE_MODPROBE_SMALL_OPTIONS_ON_CMDLINE(free(options);)
 	}
 	return EXIT_SUCCESS;
 }

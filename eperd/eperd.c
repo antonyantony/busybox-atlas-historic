@@ -37,6 +37,12 @@
 #ifndef TMPDIR
 #define TMPDIR          "/var/spool/cron"
 #endif
+#ifndef SENDMAIL
+#define SENDMAIL        "sendmail"
+#endif
+#ifndef SENDMAIL_ARGS
+#define SENDMAIL_ARGS   "-ti", "oem"
+#endif
 #ifndef CRONUPDATE
 #define CRONUPDATE      "cron.update"
 #endif
@@ -51,6 +57,11 @@ struct CronLine {
 	struct CronLine *cl_Next;
 	char *cl_Shell;         /* shell command                        */
 	pid_t cl_Pid;           /* running pid, 0, or armed (-1)        */
+#if ENABLE_FEATURE_CROND_CALL_SENDMAIL
+	int cl_MailPos;         /* 'empty file' size                    */
+	smallint cl_MailFlag;   /* running pid is for mail              */
+	char *cl_MailTo;	/* whom to mail results			*/
+#endif
 	unsigned interval;
 	time_t nextcycle;
 	time_t start_time;
@@ -104,7 +115,11 @@ static char *atlas_id= NULL;
 static void CheckUpdates(evutil_socket_t fd, short what, void *arg);
 static void CheckUpdatesHour(evutil_socket_t fd, short what, void *arg);
 static void SynchronizeDir(void);
+#if ENABLE_FEATURE_CROND_CALL_SENDMAIL
+static void EndJob(const char *user, CronLine *line);
+#else
 #define EndJob(user, line)  ((line)->cl_Pid = 0)
+#endif
 static void DeleteFile(void);
 static int Insert(CronLine *line);
 static void Start(CronLine *line);
@@ -239,11 +254,11 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 	INIT_G();
 
 	/* "-b after -f is ignored", and so on for every pair a-b */
-	opt_complementary = "f-b:b-f:S-L:L-S" IF_FEATURE_PERD_D(":d-l")
+	opt_complementary = "f-b:b-f:S-L:L-S" USE_FEATURE_PERD_D(":d-l")
 			":l+:d+"; /* -l and -d have numeric param */
-	opt = getopt32(argv, "l:L:fbSc:A:DP:" IF_FEATURE_EPERD_D("d:") "O:",
+	opt = getopt32(argv, "l:L:fbSc:A:DP:" USE_FEATURE_PERD_D("d:") "O:",
 			&LogLevel, &LogFile, &CDir, &atlas_id, &PidFileName
-			IF_FEATURE_EPERD_D(,&LogLevel), &out_filename);
+			USE_FEATURE_PERD_D(,&LogLevel), &out_filename);
 	/* both -d N and -l N set the same variable: LogLevel */
 
 	if (!(opt & OPT_f)) {
@@ -312,8 +327,61 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 	}
 	else 
 	{
-		write_pidfile("/var/run/eperd.pid");
+		write_pidfile("/var/run/crond.pid");
 	}
+#if 0
+	/* main loop - synchronize to 1 second after the minute, minimum sleep
+	 * of 1 second. */
+	{
+		time_t t1 = time(NULL);
+		time_t next;
+		time_t last_minutely= 0;
+		time_t last_hourly= 0;
+		int sleep_time = 10; /* AA previously 60 */
+		for (;;) {
+			kick_watchdog();
+			sleep(sleep_time);
+
+			kick_watchdog();
+
+			if (t1 >= last_minutely + 60)
+			{
+				last_minutely= t1;
+				CheckUpdates();
+			}
+			if (t1 >= last_hourly + 3600)
+			{
+				last_hourly= t1;
+				SynchronizeDir();
+			}
+			{
+				sleep_time= 60;
+				if (do_kick_watchdog)
+					sleep_time= 10;
+				TestJobs(&next);
+				crondlog(LVL7 "got next %d, now %d",
+					next, time(NULL));
+				if (!next)
+				{
+					crondlog(LVL7 "calling RunJobs at %d",
+						time(NULL));
+					RunJobs();
+					crondlog(LVL7 "RunJobs ended at %d",
+						time(NULL));
+					sleep_time= 1;
+				} else if (next > t1 && next < t1+sleep_time)
+					sleep_time= next-t1;
+				if (CheckJobs() > 0) {
+					sleep_time = 10;
+				}
+				crondlog(
+				LVL7 "t1 = %d, next = %d, sleep_time = %d",
+					t1, next, sleep_time);
+			}
+			t1= time(NULL);
+		}
+	}
+#endif
 	r= event_base_loop(EventBase, 0);
 	if (r != 0)
 		crondlog(LVL9 "event_base_loop failed");
@@ -366,6 +434,9 @@ static void SynchronizeFile(const char *fileName)
 	struct stat sbuf;
 	int r, maxLines;
 	char *tokens[6];
+#if ENABLE_FEATURE_CROND_CALL_SENDMAIL
+	char *mailTo = NULL;
+#endif
 	char *check0, *check1, *check2;
 	CronLine *line;
 
@@ -403,6 +474,10 @@ static void SynchronizeFile(const char *fileName)
 
 			/* check if line is setting MAILTO= */
 			if (0 == strncmp(tokens[0], "MAILTO=", 7)) {
+#if ENABLE_FEATURE_CROND_CALL_SENDMAIL
+				free(mailTo);
+				mailTo = (tokens[0][7]) ? xstrdup(&tokens[0][7]) : NULL;
+#endif /* otherwise just ignore such lines */
 				continue;
 			}
 			/* check if a minimum of tokens is specified */
@@ -445,6 +520,10 @@ static void SynchronizeFile(const char *fileName)
 			}
 
 			line->lasttime= 0;
+#if ENABLE_FEATURE_CROND_CALL_SENDMAIL
+			/* copy mailto (can be NULL) */
+			line->cl_MailTo = xstrdup(mailTo);
+#endif
 			/* copy command */
 			line->cl_Shell = xstrdup(tokens[5]);
 			if (DebugOpt) {
@@ -458,6 +537,9 @@ static void SynchronizeFile(const char *fileName)
 			if (!r)
 			{
 				/* Existing line. Delete new one */
+#if ENABLE_FEATURE_CROND_CALL_SENDMAIL
+				free(line->cl_MailTo);
+#endif
 				free(line->cl_Shell);
 				free(line);
 				continue;
@@ -865,6 +947,160 @@ error:
 	}
 }
 
+#if ENABLE_FEATURE_CROND_CALL_SENDMAIL
+
+// TODO: sendmail should be _run-time_ option, not compile-time!
+
+static void
+ForkJob(const char *user, CronLine *line, int mailFd,
+		const char *prog, const char *cmd, const char *arg,
+		const char *mail_filename)
+{
+	struct passwd *pas;
+	pid_t pid;
+
+	/* prepare things before vfork */
+	pas = getpwnam(user);
+	if (!pas) {
+		crondlog(LVL9 "can't get uid for %s", user);
+		goto err;
+	}
+	SetEnv(pas);
+
+	pid = vfork();
+	if (pid == 0) {
+		/* CHILD */
+		/* change running state to the user in question */
+		ChangeUser(pas);
+		if (DebugOpt) {
+			crondlog(LVL5 "child running %s", prog);
+		}
+		if (mailFd >= 0) {
+			xmove_fd(mailFd, mail_filename ? 1 : 0);
+			dup2(1, 2);
+		}
+		/* crond 3.0pl1-100 puts tasks in separate process groups */
+		bb_setpgrp();
+		execlp(prog, prog, cmd, arg, NULL);
+		crondlog(ERR20 "can't exec, user %s cmd %s %s %s", user, prog, cmd, arg);
+		if (mail_filename) {
+			fdprintf(1, "Exec failed: %s -c %s\n", prog, arg);
+		}
+		_exit(EXIT_SUCCESS);
+	}
+
+	line->cl_Pid = pid;
+	if (pid < 0) {
+		/* FORK FAILED */
+		crondlog(ERR20 "can't vfork");
+ err:
+		line->cl_Pid = 0;
+		if (mail_filename) {
+			unlink(mail_filename);
+		}
+	} else if (mail_filename) {
+		/* PARENT, FORK SUCCESS
+		 * rename mail-file based on pid of process
+		 */
+		char mailFile2[128];
+
+		snprintf(mailFile2, sizeof(mailFile2), "%s/cron.%s.%d", TMPDIR, user, pid);
+		rename(mail_filename, mailFile2); // TODO: xrename?
+	}
+
+	/*
+	 * Close the mail file descriptor.. we can't just leave it open in
+	 * a structure, closing it later, because we might run out of descriptors
+	 */
+	if (mailFd >= 0) {
+		close(mailFd);
+	}
+}
+
+static void RunJob(const char *user, CronLine *line)
+{
+	char mailFile[128];
+	int mailFd = -1;
+
+	line->cl_Pid = 0;
+	line->cl_MailFlag = 0;
+
+	if (line->cl_MailTo) {
+		/* open mail file - owner root so nobody can screw with it. */
+		snprintf(mailFile, sizeof(mailFile), "%s/cron.%s.%d", TMPDIR, user, getpid());
+		mailFd = open(mailFile, O_CREAT | O_TRUNC | O_WRONLY | O_EXCL | O_APPEND, 0600);
+
+		if (mailFd >= 0) {
+			line->cl_MailFlag = 1;
+			fdprintf(mailFd, "To: %s\nSubject: cron: %s\n\n", line->cl_MailTo,
+				line->cl_Shell);
+			line->cl_MailPos = lseek(mailFd, 0, SEEK_CUR);
+		} else {
+			crondlog(ERR20 "cannot create mail file %s for user %s, "
+					"discarding output", mailFile, user);
+		}
+	}
+
+
+	if (atlas_outfile && atlas_run(line->cl_Shell))
+	{
+		/* Internal command */
+		return;
+	}
+
+	ForkJob(user, line, mailFd, DEFAULT_SHELL, "-c", line->cl_Shell, mailFile);
+}
+
+/*
+ * EndJob - called when job terminates and when mail terminates
+ */
+static void EndJob(const char *user, CronLine *line)
+{
+	int mailFd;
+	char mailFile[128];
+	struct stat sbuf;
+
+	/* No job */
+	if (line->cl_Pid <= 0) {
+		line->cl_Pid = 0;
+		return;
+	}
+
+	/*
+	 * End of job and no mail file
+	 * End of sendmail job
+	 */
+	snprintf(mailFile, sizeof(mailFile), "%s/cron.%s.%d", TMPDIR, user, line->cl_Pid);
+	line->cl_Pid = 0;
+
+	if (line->cl_MailFlag == 0) {
+		return;
+	}
+	line->cl_MailFlag = 0;
+
+	/*
+	 * End of primary job - check for mail file.  If size has increased and
+	 * the file is still valid, we sendmail it.
+	 */
+	mailFd = open(mailFile, O_RDONLY);
+	unlink(mailFile);
+	if (mailFd < 0) {
+		return;
+	}
+
+	if (fstat(mailFd, &sbuf) < 0 || sbuf.st_uid != DaemonUid
+	 || sbuf.st_nlink != 0 || sbuf.st_size == line->cl_MailPos
+	 || !S_ISREG(sbuf.st_mode)
+	) {
+		close(mailFd);
+		return;
+	}
+	if (line->cl_MailTo)
+		ForkJob(user, line, mailFd, SENDMAIL, SENDMAIL_ARGS, NULL);
+}
+
+#else /* crond without sendmail */
+
 static void RunJob(evutil_socket_t __attribute__ ((unused)) fd,
 	short __attribute__ ((unused)) what, void *arg)
 {
@@ -919,7 +1155,9 @@ static void RunJob(evutil_socket_t __attribute__ ((unused)) fd,
 	tv.tv_usec= 0;
 	crondlog(LVL7 "RunJob: nextcycle %d, interval %d, start_time %d, distr_offset %d, now %d, tv_sec %d",
 		line->nextcycle, line->interval,
-		line->start_time, line->distr_offset, now, 
+		line->start_time, line->distr_offset, now,
 		tv.tv_sec);
 	event_add(&line->event, &tv);
 }
+
+#endif /* ENABLE_FEATURE_CROND_CALL_SENDMAIL */

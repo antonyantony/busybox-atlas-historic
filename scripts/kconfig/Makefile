@@ -17,28 +17,11 @@ menuconfig: $(obj)/mconf
 config: $(obj)/conf
 	$< Config.in
 
-# Mtime granularity problem.
-# It was observed that these commands:
-# make allnoconfig; sed -i -e '/CONFIG_TRUE/s/.*/CONFIG_TRUE=y/' .config; make
-# sometimes produce busybox with "true" applet still disabled.
-# This is caused by .config updated by sed having mtime which is still
-# equal to (not bigger than) include/autoconf.h's mtime,
-# and thus 2nd make does not regenerate include/autoconf.h.
-# Waiting for 1 second after non-interactive "make XXXXconfig"
-# prevents this from happening.
-#
-# We'd like to detect whether filesystem we are on has coarse mtimes,
-# but can't do it yet, bbox ls hasn't got --full-time.
-#MTIME_IS_COARSE:=@ls --full-time -ld | grep -F .000 >/dev/null
-MTIME_IS_COARSE:=@true
-
 oldconfig: $(obj)/conf
 	$< -o Config.in
-	$(MTIME_IS_COARSE) && sleep 1
 
 silentoldconfig: $(obj)/conf
 	$< -s Config.in
-	$(MTIME_IS_COARSE) && sleep 1
 
 update-po-config: $(obj)/kxgettext
 	xgettext --default-domain=linux \
@@ -63,19 +46,15 @@ PHONY += randconfig allyesconfig allnoconfig allmodconfig defconfig
 
 randconfig: $(obj)/conf
 	$< -r Config.in
-	$(MTIME_IS_COARSE) && sleep 1
 
 allyesconfig: $(obj)/conf
 	$< -y Config.in
-	$(MTIME_IS_COARSE) && sleep 1
 
 allnoconfig: $(obj)/conf
 	$< -n Config.in
-	$(MTIME_IS_COARSE) && sleep 1
 
 allmodconfig: $(obj)/conf
 	$< -m Config.in
-	$(MTIME_IS_COARSE) && sleep 1
 
 defconfig: $(obj)/conf
 ifeq ($(KBUILD_DEFCONFIG),)
@@ -84,11 +63,9 @@ else
 	@echo *** Default configuration is based on '$(KBUILD_DEFCONFIG)'
 	$(Q)$< -D $(KBUILD_DEFCONFIG) Config.in
 endif
-	$(MTIME_IS_COARSE) && sleep 1
 
 %_defconfig: $(obj)/conf
-	$(Q)$< -D configs/$@ Config.in
-	$(MTIME_IS_COARSE) && sleep 1
+	$(Q)$< -D $@ Config.in
 
 # Help text used by make help
 help:

@@ -18,17 +18,6 @@
  *	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-//kbuild:### lib-$(CONFIG_FEATURE_VOLUMEID_NVIDIARAID) += nvidia_raid.o
-
-//config:
-//config:### config FEATURE_VOLUMEID_NVIDIARAID
-//config:###	bool "nvidia raid"
-//config:###	default y
-//config:###	depends on VOLUMEID
-//config:###	help
-//config:###	  TODO
-//config:
-
 #include "volume_id_internal.h"
 
 struct nvidia_meta {
@@ -36,11 +25,11 @@ struct nvidia_meta {
 	uint32_t	size;
 	uint32_t	chksum;
 	uint16_t	version;
-} PACKED;
+} __attribute__((packed));
 
 #define NVIDIA_SIGNATURE		"NVIDIA"
 
-int FAST_FUNC volume_id_probe_nvidia_raid(struct volume_id *id, uint64_t off, uint64_t size)
+int volume_id_probe_nvidia_raid(struct volume_id *id, uint64_t off, uint64_t size)
 {
 	uint64_t meta_off;
 	struct nvidia_meta *nv;

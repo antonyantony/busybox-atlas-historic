@@ -1,18 +1,21 @@
 /* vi: set sw=4 ts=4: */
 /*
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version
- * 2 of the License, or (at your option) any later version.
+ * rtm_map.c
  *
- * Authors: Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
+ *		This program is free software; you can redistribute it and/or
+ *		modify it under the terms of the GNU General Public License
+ *		as published by the Free Software Foundation; either version
+ *		2 of the License, or (at your option) any later version.
+ *
+ * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
+ *
  */
 
 #include "libbb.h"
 #include "rt_names.h"
 #include "utils.h"
 
-const char* FAST_FUNC rtnl_rtntype_n2a(int id, char *buf)
+const char *rtnl_rtntype_n2a(int id, char *buf, int len)
 {
 	switch (id) {
 	case RTN_UNSPEC:
@@ -40,14 +43,13 @@ const char* FAST_FUNC rtnl_rtntype_n2a(int id, char *buf)
 	case RTN_XRESOLVE:
 		return "xresolve";
 	default:
-		/* buf is SPRINT_BSIZE big */
-		sprintf(buf, "%d", id);
+		snprintf(buf, len, "%d", id);
 		return buf;
 	}
 }
 
 
-int FAST_FUNC rtnl_rtntype_a2n(int *id, char *arg)
+int rtnl_rtntype_a2n(int *id, char *arg)
 {
 	static const char keywords[] ALIGN1 =
 		"local\0""nat\0""broadcast\0""brd\0""anycast\0"
@@ -86,14 +88,14 @@ int FAST_FUNC rtnl_rtntype_a2n(int *id, char *arg)
 		res = RTN_THROW;
 	else {
 		res = strtoul(arg, &end, 0);
-		if (end == arg || *end || res > 255)
+		if (!end || end == arg || *end || res > 255)
 			return -1;
 	}
 	*id = res;
 	return 0;
 }
 
-int FAST_FUNC get_rt_realms(uint32_t *realms, char *arg)
+int get_rt_realms(uint32_t *realms, char *arg)
 {
 	uint32_t realm = 0;
 	char *p = strchr(arg, '/');

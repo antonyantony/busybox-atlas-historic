@@ -15,21 +15,24 @@
    You should have received a copy of the GNU Lesser General Public
    License along with the GNU C Library; if not, write to the Free
    Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
-   02111-1307 USA.
- */
-/*
- * POSIX Standard: 9.2.1 Group Database Access	<grp.h>
- */
-#ifndef BB_GRP_H
-#define BB_GRP_H 1
+   02111-1307 USA.  */
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+/*
+ *	POSIX Standard: 9.2.1 Group Database Access	<grp.h>
+ */
+
+#ifndef	BB_GRP_H
+#define	BB_GRP_H 1
+
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 /* This file is #included after #include <grp.h>
  * We will use libc-defined structures, but will #define function names
  * so that function calls are directed to bb_internal_XXX replacements
  */
-#undef endgrent
+
 #define setgrent     bb_internal_setgrent
 #define endgrent     bb_internal_endgrent
 #define getgrent     bb_internal_getgrent
@@ -55,7 +58,6 @@ extern void setgrent(void);
 /* Close the group-file stream.  */
 extern void endgrent(void);
 
-#ifdef UNUSED_SINCE_WE_AVOID_STATIC_BUFS
 /* Read an entry from the group-file stream, opening it if necessary.  */
 extern struct group *getgrent(void);
 
@@ -64,8 +66,7 @@ extern struct group *fgetgrent(FILE *__stream);
 
 /* Write the given entry onto the given stream.  */
 extern int putgrent(const struct group *__restrict __p,
-		FILE *__restrict __f);
-#endif
+		     FILE *__restrict __f);
 
 /* Search for an entry with a matching group ID.  */
 extern struct group *getgrgid(gid_t __gid);
@@ -82,38 +83,40 @@ extern struct group *getgrnam(const char *__name);
    POSIX people would choose.  */
 
 extern int getgrent_r(struct group *__restrict __resultbuf,
-		char *__restrict __buffer, size_t __buflen,
-		struct group **__restrict __result);
+		       char *__restrict __buffer, size_t __buflen,
+		       struct group **__restrict __result);
 
 /* Search for an entry with a matching group ID.  */
 extern int getgrgid_r(gid_t __gid, struct group *__restrict __resultbuf,
-		char *__restrict __buffer, size_t __buflen,
-		struct group **__restrict __result);
+		       char *__restrict __buffer, size_t __buflen,
+		       struct group **__restrict __result);
 
 /* Search for an entry with a matching group name.  */
 extern int getgrnam_r(const char *__restrict __name,
-		struct group *__restrict __resultbuf,
-		char *__restrict __buffer, size_t __buflen,
-		struct group **__restrict __result);
+		       struct group *__restrict __resultbuf,
+		       char *__restrict __buffer, size_t __buflen,
+		       struct group **__restrict __result);
 
 /* Read a group entry from STREAM.  This function is not standardized
    an probably never will.  */
 extern int fgetgrent_r(FILE *__restrict __stream,
-		struct group *__restrict __resultbuf,
-		char *__restrict __buffer, size_t __buflen,
-		struct group **__restrict __result);
+			struct group *__restrict __resultbuf,
+			char *__restrict __buffer, size_t __buflen,
+			struct group **__restrict __result);
 
 /* Store at most *NGROUPS members of the group set for USER into
    *GROUPS.  Also include GROUP.  The actual number of groups found is
    returned in *NGROUPS.  Return -1 if the if *NGROUPS is too small.  */
 extern int getgrouplist(const char *__user, gid_t __group,
-		gid_t *__groups, int *__ngroups);
+			 gid_t *__groups, int *__ngroups);
 
 /* Initialize the group set for the current user
    by reading the group database and using all groups
    of which USER is a member.  Also include GROUP.  */
 extern int initgroups(const char *__user, gid_t __group);
 
-POP_SAVED_FUNCTION_VISIBILITY
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
+#endif
 
 #endif

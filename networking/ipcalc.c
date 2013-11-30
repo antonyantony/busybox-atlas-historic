@@ -9,41 +9,17 @@
  * from Red Hat.  I didn't look at their source code, but there
  * is no denying that this is a loving reimplementation
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
-//usage:#define ipcalc_trivial_usage
-//usage:       "[OPTIONS] ADDRESS[[/]NETMASK] [NETMASK]"
-//usage:#define ipcalc_full_usage "\n\n"
-//usage:       "Calculate IP network settings from a IP address\n"
-//usage:	IF_FEATURE_IPCALC_LONG_OPTIONS(
-//usage:     "\n	-b,--broadcast	Display calculated broadcast address"
-//usage:     "\n	-n,--network	Display calculated network address"
-//usage:     "\n	-m,--netmask	Display default netmask for IP"
-//usage:	IF_FEATURE_IPCALC_FANCY(
-//usage:     "\n	-p,--prefix	Display the prefix for IP/NETMASK"
-//usage:     "\n	-h,--hostname	Display first resolved host name"
-//usage:     "\n	-s,--silent	Don't ever display error messages"
-//usage:	)
-//usage:	)
-//usage:	IF_NOT_FEATURE_IPCALC_LONG_OPTIONS(
-//usage:     "\n	-b	Display calculated broadcast address"
-//usage:     "\n	-n	Display calculated network address"
-//usage:     "\n	-m	Display default netmask for IP"
-//usage:	IF_FEATURE_IPCALC_FANCY(
-//usage:     "\n	-p	Display the prefix for IP/NETMASK"
-//usage:     "\n	-h	Display first resolved host name"
-//usage:     "\n	-s	Don't ever display error messages"
-//usage:	)
-//usage:	)
-
-#include "libbb.h"
-/* After libbb.h, because on some systems it needs other includes */
+#include <sys/socket.h>
 #include <arpa/inet.h>
 
-#define CLASS_A_NETMASK ntohl(0xFF000000)
-#define CLASS_B_NETMASK ntohl(0xFFFF0000)
-#define CLASS_C_NETMASK ntohl(0xFFFFFF00)
+#include "libbb.h"
+
+#define CLASS_A_NETMASK	ntohl(0xFF000000)
+#define CLASS_B_NETMASK	ntohl(0xFFFF0000)
+#define CLASS_C_NETMASK	ntohl(0xFFFFFF00)
 
 static unsigned long get_netmask(unsigned long ipaddr)
 {
@@ -87,47 +63,41 @@ int get_prefix(unsigned long netmask);
 
 #if ENABLE_FEATURE_IPCALC_LONG_OPTIONS
 	static const char ipcalc_longopts[] ALIGN1 =
-		"netmask\0"   No_argument "m" // netmask from IP (assuming complete class A, B, or C network)
-		"broadcast\0" No_argument "b" // broadcast from IP [netmask]
-		"network\0"   No_argument "n" // network from IP [netmask]
+		"netmask\0"   No_argument "m"
+		"broadcast\0" No_argument "b"
+		"network\0"   No_argument "n"
 # if ENABLE_FEATURE_IPCALC_FANCY
-		"prefix\0"    No_argument "p" // prefix from IP[/prefix] [netmask]
-		"hostname\0"  No_argument "h" // hostname from IP
-		"silent\0"    No_argument "s" // don’t ever display error messages
+		"prefix\0"    No_argument "p"
+		"hostname\0"  No_argument "h"
+		"silent\0"    No_argument "s"
 # endif
 		;
 #endif
 
 int ipcalc_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-int ipcalc_main(int argc UNUSED_PARAM, char **argv)
+int ipcalc_main(int argc, char **argv)
 {
 	unsigned opt;
-	bool have_netmask = 0;
-	struct in_addr s_netmask, s_broadcast, s_network, s_ipaddr;
-	/* struct in_addr { in_addr_t s_addr; }  and  in_addr_t
-	 * (which in turn is just a typedef to uint32_t)
-	 * are essentially the same type. A few macros for less verbosity: */
-#define netmask   (s_netmask.s_addr)
-#define broadcast (s_broadcast.s_addr)
-#define network   (s_network.s_addr)
-#define ipaddr    (s_ipaddr.s_addr)
+	int have_netmask = 0;
+	in_addr_t netmask, broadcast, network, ipaddr;
+	struct in_addr a;
 	char *ipstr;
 
 #if ENABLE_FEATURE_IPCALC_LONG_OPTIONS
 	applet_long_options = ipcalc_longopts;
 #endif
-	opt_complementary = "-1:?2"; /* minimum 1 arg, maximum 2 args */
-	opt = getopt32(argv, "mbn" IF_FEATURE_IPCALC_FANCY("phs"));
+	opt = getopt32(argv, "mbn" USE_FEATURE_IPCALC_FANCY("phs"));
+	argc -= optind;
 	argv += optind;
-	if (opt & SILENT)
-		logmode = LOGMODE_NONE; /* suppress error_msg() output */
-	opt &= ~SILENT;
-	if (!(opt & (BROADCAST | NETWORK | NETPREFIX))) {
-		/* if no options at all or
-		 * (no broadcast,network,prefix) and (two args)... */
-		if (!opt || argv[1])
+	if (opt & (BROADCAST | NETWORK | NETPREFIX)) {
+		if (argc > 2 || argc <= 0)
+			bb_show_usage();
+	} else {
+		if (argc != 1)
 			bb_show_usage();
 	}
+	if (opt & SILENT)
+		logmode = LOGMODE_NONE; /* Suppress error_msg() output */
 
 	ipstr = argv[0];
 	if (ENABLE_FEATURE_IPCALC_FANCY) {
@@ -138,7 +108,8 @@ int ipcalc_main(int argc UNUSED_PARAM, char **argv)
 
 		while (*prefixstr) {
 			if (*prefixstr == '/') {
-				*prefixstr++ = '\0';
+				*prefixstr = (char)0;
+				prefixstr++;
 				if (*prefixstr) {
 					unsigned msk;
 					netprefix = xatoul_range(prefixstr, 0, 32);
@@ -159,36 +130,42 @@ int ipcalc_main(int argc UNUSED_PARAM, char **argv)
 			prefixstr++;
 		}
 	}
+	ipaddr = inet_aton(ipstr, &a);
 
-	if (inet_aton(ipstr, &s_ipaddr) == 0) {
+	if (ipaddr == 0) {
 		bb_error_msg_and_die("bad IP address: %s", argv[0]);
 	}
+	ipaddr = a.s_addr;
 
-	if (argv[1]) {
+	if (argc == 2) {
 		if (ENABLE_FEATURE_IPCALC_FANCY && have_netmask) {
 			bb_error_msg_and_die("use prefix or netmask, not both");
 		}
-		if (inet_aton(argv[1], &s_netmask) == 0) {
+
+		netmask = inet_aton(argv[1], &a);
+		if (netmask == 0) {
 			bb_error_msg_and_die("bad netmask: %s", argv[1]);
 		}
+		netmask = a.s_addr;
 	} else {
+
 		/* JHC - If the netmask wasn't provided then calculate it */
 		if (!ENABLE_FEATURE_IPCALC_FANCY || !have_netmask)
 			netmask = get_netmask(ipaddr);
 	}
 
 	if (opt & NETMASK) {
-		printf("NETMASK=%s\n", inet_ntoa(s_netmask));
+		printf("NETMASK=%s\n", inet_ntoa((*(struct in_addr *) &netmask)));
 	}
 
 	if (opt & BROADCAST) {
 		broadcast = (ipaddr & netmask) | ~netmask;
-		printf("BROADCAST=%s\n", inet_ntoa(s_broadcast));
+		printf("BROADCAST=%s\n", inet_ntoa((*(struct in_addr *) &broadcast)));
 	}
 
 	if (opt & NETWORK) {
 		network = ipaddr & netmask;
-		printf("NETWORK=%s\n", inet_ntoa(s_network));
+		printf("NETWORK=%s\n", inet_ntoa((*(struct in_addr *) &network)));
 	}
 
 	if (ENABLE_FEATURE_IPCALC_FANCY) {
@@ -201,7 +178,7 @@ int ipcalc_main(int argc UNUSED_PARAM, char **argv)
 
 			hostinfo = gethostbyaddr((char *) &ipaddr, sizeof(ipaddr), AF_INET);
 			if (!hostinfo) {
-				bb_herror_msg_and_die("can't find hostname for %s", argv[0]);
+				bb_herror_msg_and_die("cannot find hostname for %s", argv[0]);
 			}
 			str_tolower(hostinfo->h_name);
 

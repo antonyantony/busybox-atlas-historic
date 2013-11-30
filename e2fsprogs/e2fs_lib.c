@@ -2,7 +2,8 @@
 /*
  * See README for additional information
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * This file can be redistributed under the terms of the GNU Library General
+ * Public License
  */
 
 #include "libbb.h"
@@ -28,20 +29,33 @@ static void close_silently(int fd)
 
 /* Iterate a function on each entry of a directory */
 int iterate_on_dir(const char *dir_name,
-		int FAST_FUNC (*func)(const char *, struct dirent *, void *),
-		void *private)
+		int (*func)(const char *, struct dirent *, void *),
+		void * private)
 {
 	DIR *dir;
-	struct dirent *de;
+	struct dirent *de, *dep;
+	int max_len, len;
+
+	max_len = PATH_MAX + sizeof(struct dirent);
+	de = xmalloc(max_len+1);
+	memset(de, 0, max_len+1);
 
 	dir = opendir(dir_name);
 	if (dir == NULL) {
+		free(de);
 		return -1;
 	}
-	while ((de = readdir(dir)) != NULL) {
+	while ((dep = readdir(dir))) {
+		len = sizeof(struct dirent);
+		if (len < dep->d_reclen)
+			len = dep->d_reclen;
+		if (len > max_len)
+			len = max_len;
+		memcpy(de, dep, len);
 		func(dir_name, de, private);
 	}
 	closedir(dir);
+	free(de);
 	return 0;
 }
 
@@ -53,7 +67,7 @@ int fgetsetversion(const char *name, unsigned long *get_version, unsigned long s
 	int fd, r;
 	IF_LONG_IS_WIDER(int ver;)
 
-	fd = open(name, O_RDONLY | O_NONBLOCK);
+	fd = open(name, O_NONBLOCK);
 	if (fd == -1)
 		return -1;
 	if (!get_version) {
@@ -95,7 +109,7 @@ int fgetsetflags(const char *name, unsigned long *get_flags, unsigned long set_f
 	) {
 		goto notsupp;
 	}
-	fd = open(name, O_RDONLY | O_NONBLOCK); /* neither read nor write asked for */
+	fd = open(name, O_NONBLOCK); /* neither read nor write asked for */
 	if (fd == -1)
 		return -1;
 

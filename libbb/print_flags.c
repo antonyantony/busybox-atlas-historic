@@ -3,9 +3,10 @@
  *
  * Copyright (C) 2008 Natanael Copa <natanael.copa@gmail.com>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
-#include "libbb.h"
+
+#include <libbb.h>
 
 /* returns a set with the flags not printed */
 int FAST_FUNC print_flags_separated(const int *masks, const char *labels, int flags, const char *separator)

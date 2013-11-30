@@ -4,20 +4,24 @@
  * C library we're linking against may not support regex.h.
  *
  * Based in part on code from sash, Copyright (c) 1999 by David I. Bell
- * Permission has been granted to redistribute this code under GPL.
+ * Permission has been granted to redistribute this code under the GPL.
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file License in this tarball for details.
  */
-#ifndef BB_REGEX_H
-#define BB_REGEX_H 1
+#ifndef __BB_REGEX__
+#define __BB_REGEX__
 
 #include <regex.h>
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 char* regcomp_or_errmsg(regex_t *preg, const char *regex, int cflags) FAST_FUNC;
 void xregcomp(regex_t *preg, const char *regex, int cflags) FAST_FUNC;
 
-POP_SAVED_FUNCTION_VISIBILITY
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
+#endif
 
 #endif

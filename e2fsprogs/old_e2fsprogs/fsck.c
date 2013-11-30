@@ -20,7 +20,10 @@
  * Copyright (C) 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000,
  *      2001, 2002, 2003, 2004, 2005 by  Theodore Ts'o.
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * %Begin-Header%
+ * This file may be redistributed under the terms of the GNU Public
+ * License.
+ * %End-Header%
  */
 
 #include <sys/types.h>
@@ -349,7 +352,15 @@ static void parse_escape(char *word)
 	if (!word)
 		return;
 
-	strcpy_and_process_escape_sequences(word, word);
+	for (p = q = word; *p; q++) {
+		c = *p++;
+		if (c != '\\') {
+			*q = c;
+		} else {
+			*q = bb_process_escape_sequence(&p);
+		}
+	}
+	*q = 0;
 }
 
 static void free_instance(struct fsck_instance *i)
@@ -369,7 +380,8 @@ static struct fs_info *create_fs_device(const char *device, const char *mntpnt,
 {
 	struct fs_info *fs;
 
-	fs = xmalloc(sizeof(struct fs_info));
+	if (!(fs = malloc(sizeof(struct fs_info))))
+		return NULL;
 
 	fs->device = string_copy(device);
 	fs->mountpt = string_copy(mntpnt);
@@ -564,7 +576,10 @@ static int execute(const char *type, const char *device, const char *mntpt,
 	struct fsck_instance *inst, *p;
 	pid_t   pid;
 
-	inst = xzalloc(sizeof(struct fsck_instance));
+	inst = malloc(sizeof(struct fsck_instance));
+	if (!inst)
+		return ENOMEM;
+	memset(inst, 0, sizeof(struct fsck_instance));
 
 	prog = xasprintf("fsck.%s", type);
 	argv[0] = prog;
@@ -604,7 +619,7 @@ static int execute(const char *type, const char *device, const char *mntpt,
 	if (noexecute)
 		pid = -1;
 	else if ((pid = fork()) < 0) {
-		perror("vfork"+1);
+		perror("fork");
 		return errno;
 	} else if (pid == 0) {
 		if (!interactive)
@@ -989,7 +1004,7 @@ static int ignore(struct fs_info *fs)
 	s = find_fsck(fs->type);
 	if (s == NULL) {
 		if (wanted)
-			bb_error_msg("can't check %s: fsck.%s not found",
+			bb_error_msg("cannot check %s: fsck.%s not found",
 				fs->device, fs->type);
 		return 1;
 	}
@@ -1158,7 +1173,7 @@ static void signal_cancel(int sig FSCK_ATTR((unused)))
 static void PRS(int argc, char **argv)
 {
 	int     i, j;
-	char    *arg, *dev, *tmp = NULL;
+	char    *arg, *dev, *tmp = 0;
 	char    options[128];
 	int     opt = 0;
 	int     opts_for_fsck = 0;
@@ -1191,7 +1206,7 @@ static void PRS(int argc, char **argv)
 				 * /proc/partitions isn't found.
 				 */
 				if (access("/proc/partitions", R_OK) < 0) {
-					bb_perror_msg_and_die("can't open /proc/partitions "
+					bb_perror_msg_and_die("cannot open /proc/partitions "
 							"(is /proc mounted?)");
 				}
 				/*
@@ -1203,7 +1218,7 @@ static void PRS(int argc, char **argv)
 		"must be root to scan for matching filesystems: %s\n", arg);
 				else
 					bb_error_msg_and_die(
-		"can't find matching filesystem: %s", arg);
+		"cannot find matching filesystem: %s", arg);
 			}
 			devices[num_devices++] = dev ? dev : string_copy(arg);
 			continue;
@@ -1239,6 +1254,7 @@ static void PRS(int argc, char **argv)
 						progress_fd = 0;
 					else {
 						goto next_arg;
+						i++;
 					}
 				}
 				break;

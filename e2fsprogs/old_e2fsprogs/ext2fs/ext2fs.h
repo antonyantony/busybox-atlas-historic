@@ -9,8 +9,9 @@
  * License.
  * %End-Header%
  */
-#ifndef EXT2FS_EXT2FS_H
-#define EXT2FS_EXT2FS_H 1
+
+#ifndef _EXT2FS_EXT2FS_H
+#define _EXT2FS_EXT2FS_H
 
 
 #define EXT2FS_ATTR(x)
@@ -383,7 +384,7 @@ typedef struct ext2_icount *ext2_icount_t;
 #define EXT2_LIB_FEATURE_COMPAT_SUPP	(EXT2_FEATURE_COMPAT_DIR_PREALLOC|\
 					 EXT2_FEATURE_COMPAT_IMAGIC_INODES|\
 					 EXT3_FEATURE_COMPAT_HAS_JOURNAL|\
-					 EXT2_FEATURE_COMPAT_RESIZE_INO|\
+					 EXT2_FEATURE_COMPAT_RESIZE_INODE|\
 					 EXT2_FEATURE_COMPAT_DIR_INDEX|\
 					 EXT2_FEATURE_COMPAT_EXT_ATTR)
 
@@ -919,4 +920,4 @@ extern blk_t ext2fs_inode_data_blocks(ext2_filsys fs,
 }
 #endif
 
-#endif
+#endif /* _EXT2FS_EXT2FS_H */

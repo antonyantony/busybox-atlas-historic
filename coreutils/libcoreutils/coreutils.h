@@ -1,12 +1,14 @@
 /* vi: set sw=4 ts=4: */
 /*
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under the GPL v2 or later, see the file LICENSE in this tarball.
  */
 
 #ifndef COREUTILS_H
-#define COREUTILS_H 1
+#define COREUTILS_H		1
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 typedef int (*stat_func)(const char *fn, struct stat *ps);
 
@@ -15,6 +17,8 @@ int cp_mv_stat(const char *fn, struct stat *fn_stat) FAST_FUNC;
 
 mode_t getopt_mk_fifo_nod(char **argv) FAST_FUNC;
 
-POP_SAVED_FUNCTION_VISIBILITY
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
+#endif
 
 #endif

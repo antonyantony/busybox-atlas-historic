@@ -4,15 +4,14 @@
  *
  * Copyright (C) 2003  Manuel Novoa III  <mjn3@codepoet.org>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
+
 #include "libbb.h"
 
-#if ENABLE_DESKTOP
-void FAST_FUNC bb_warn_ignoring_args(char *arg)
+void FAST_FUNC bb_warn_ignoring_args(int n)
 {
-	if (arg) {
+	if (n) {
 		bb_error_msg("ignoring all arguments");
 	}
 }
-#endif

@@ -8,10 +8,6 @@
  * i18n, 2005, Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  */
 
-#define _XOPEN_SOURCE 700
-/* On Darwin, this may be needed to get SIGWINCH: */
-#define _DARWIN_C_SOURCE 1
-
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <ctype.h>
@@ -22,7 +18,6 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> /* for strcasecmp */
 #include <termios.h>
 #include <unistd.h>
 #include <locale.h>
@@ -261,9 +256,9 @@ search_help[] = N_(
 	"          USB$ => find all CONFIG_ symbols ending with USB\n"
 	"\n");
 
-static char buf[4096*10], *bufptr = buf;
+static char buf[4096], *bufptr = buf;
 static char input_buf[4096];
-static const char filename[] = ".config";
+static char filename[PATH_MAX+1] = ".config";
 static char *args[1024], **argptr = args;
 static int indent;
 static struct termios ios_org;
@@ -445,7 +440,6 @@ static struct gstr get_relations_str(struct symbol **sym_arr)
 
 pid_t pid;
 
-#ifdef SIGWINCH
 static void winch_handler(int sig)
 {
 	if (!do_resize) {
@@ -453,11 +447,11 @@ static void winch_handler(int sig)
 		do_resize = 1;
 	}
 }
-#endif
 
 static int exec_conf(void)
 {
 	int pipefd[2], stat, size;
+	struct sigaction sa;
 	sigset_t sset, osset;
 
 	sigemptyset(&sset);
@@ -466,15 +460,10 @@ static int exec_conf(void)
 
 	signal(SIGINT, SIG_DFL);
 
-#ifdef SIGWINCH
-	{
-		struct sigaction sa;
-		sa.sa_handler = winch_handler;
-		sigemptyset(&sa.sa_mask);
-		sa.sa_flags = SA_RESTART;
-		sigaction(SIGWINCH, &sa, NULL);
-	}
-#endif
+	sa.sa_handler = winch_handler;
+	sigemptyset(&sa.sa_mask);
+	sa.sa_flags = SA_RESTART;
+	sigaction(SIGWINCH, &sa, NULL);
 
 	*argptr++ = NULL;
 

@@ -18,17 +18,6 @@
  *	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-//kbuild:lib-$(CONFIG_FEATURE_VOLUMEID_LUKS) += luks.o
-
-//config:
-//config:config FEATURE_VOLUMEID_LUKS
-//config:	bool "luks filesystem"
-//config:	default y
-//config:	depends on VOLUMEID
-//config:	help
-//config:	  TODO
-//config:
-
 #include "volume_id_internal.h"
 
 #define LUKS_MAGIC_L             6
@@ -91,9 +80,8 @@ struct BUG_bad_size_luks_phdr {
 		1 : -1];
 };
 
-int FAST_FUNC volume_id_probe_luks(struct volume_id *id /*,uint64_t off*/)
+int volume_id_probe_luks(struct volume_id *id, uint64_t off)
 {
-#define off ((uint64_t)0)
 	struct luks_phdr *header;
 
 	header = volume_id_get_buffer(id, off, sizeof(*header));
@@ -105,7 +93,7 @@ int FAST_FUNC volume_id_probe_luks(struct volume_id *id /*,uint64_t off*/)
 
 //	volume_id_set_usage(id, VOLUME_ID_CRYPTO);
 	volume_id_set_uuid(id, header->uuid, UUID_DCE_STRING);
-	IF_FEATURE_BLKID_TYPE(id->type = "crypto_LUKS";)
+//	id->type = "crypto_LUKS";
 
 	return 0;
 }

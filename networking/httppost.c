@@ -15,7 +15,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "libbb.h"
-#include "atlas_probe.h"
 
 #define SAFE_PREFIX_DATA_OUT ATLAS_DATA_OUT
 #define SAFE_PREFIX_DATA_OOQ_OUT ATLAS_DATA_OOQ_OUT

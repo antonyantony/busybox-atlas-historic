@@ -6,7 +6,7 @@
  * Copyright (C) 2006 Rob Landley
  * Copyright (C) 2006 Denys Vlasenko
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * Licensed under GPL version 2, see file LICENSE in this tarball for details.
  */
 
 /* We need to have separate xfuncs.c and xfuncs_printf.c because
@@ -134,7 +134,7 @@ int FAST_FUNC xopen3(const char *pathname, int flags, int mode)
 	return ret;
 }
 
-// Die if we can't open a file and return a fd.
+// Die if we can't open an existing file and return a fd.
 int FAST_FUNC xopen(const char *pathname, int flags)
 {
 	return xopen3(pathname, flags, 0666);
@@ -156,32 +156,6 @@ int FAST_FUNC open3_or_warn(const char *pathname, int flags, int mode)
 int FAST_FUNC open_or_warn(const char *pathname, int flags)
 {
 	return open3_or_warn(pathname, flags, 0666);
-}
-
-/* Die if we can't open an existing file readonly with O_NONBLOCK
- * and return the fd.
- * Note that for ioctl O_RDONLY is sufficient.
- */
-int FAST_FUNC xopen_nonblocking(const char *pathname)
-{
-	return xopen(pathname, O_RDONLY | O_NONBLOCK);
-}
-
-int FAST_FUNC xopen_as_uid_gid(const char *pathname, int flags, uid_t u, gid_t g)
-{
-	int fd;
-	uid_t old_euid = geteuid();
-	gid_t old_egid = getegid();
-
-	xsetegid(g);
-	xseteuid(u);
-
-	fd = xopen(pathname, flags);
-
-	xseteuid(old_euid);
-	xsetegid(old_egid);
-
-	return fd;
 }
 
 void FAST_FUNC xunlink(const char *pathname)
@@ -234,16 +208,6 @@ void FAST_FUNC xwrite(int fd, const void *buf, size_t count)
 			bb_error_msg_and_die("short write");
 	}
 }
-void FAST_FUNC xwrite_str(int fd, const char *str)
-{
-	xwrite(fd, str, strlen(str));
-}
-
-void FAST_FUNC xclose(int fd)
-{
-	if (close(fd))
-		bb_perror_msg_and_die("close failed");
-}
 
 // Die with an error message if we can't lseek to the right spot.
 off_t FAST_FUNC xlseek(int fd, off_t offset, int whence)
@@ -255,14 +219,6 @@ off_t FAST_FUNC xlseek(int fd, off_t offset, int whence)
 		bb_perror_msg_and_die("lseek");
 	}
 	return off;
-}
-
-int FAST_FUNC xmkstemp(char *template)
-{
-	int fd = mkstemp(template);
-	if (fd < 0)
-		bb_perror_msg_and_die("can't create temp file '%s'", template);
-	return fd;
 }
 
 // Die with supplied filename if this FILE* has ferror set.
@@ -280,24 +236,30 @@ void FAST_FUNC die_if_ferror_stdout(void)
 	die_if_ferror(stdout, bb_msg_standard_output);
 }
 
-int FAST_FUNC fflush_all(void)
+// Die with an error message if we have trouble flushing stdout.
+void FAST_FUNC xfflush_stdout(void)
 {
-	return fflush(NULL);
+	if (fflush(stdout)) {
+		bb_perror_msg_and_die(bb_msg_standard_output);
+	}
 }
 
 
 int FAST_FUNC bb_putchar(int ch)
 {
-	return putchar(ch);
+	/* time.c needs putc(ch, stdout), not putchar(ch).
+	 * it does "stdout = stderr;", but then glibc's putchar()
+	 * doesn't work as expected. bad glibc, bad */
+	return putc(ch, stdout);
 }
 
 /* Die with an error message if we can't copy an entire FILE* to stdout,
  * then close that file. */
 void FAST_FUNC xprint_and_close_file(FILE *file)
 {
-	fflush_all();
+	fflush(stdout);
 	// copyfd outputs error messages for us.
-	if (bb_copyfd_eof(fileno(file), STDOUT_FILENO) == -1)
+	if (bb_copyfd_eof(fileno(file), 1) == -1)
 		xfunc_die();
 
 	fclose(file);
@@ -311,47 +273,64 @@ char* FAST_FUNC xasprintf(const char *format, ...)
 	int r;
 	char *string_ptr;
 
+#if 1
+	// GNU extension
 	va_start(p, format);
 	r = vasprintf(&string_ptr, format, p);
 	va_end(p);
+#else
+	// Bloat for systems that haven't got the GNU extension.
+	va_start(p, format);
+	r = vsnprintf(NULL, 0, format, p);
+	va_end(p);
+	string_ptr = xmalloc(r+1);
+	va_start(p, format);
+	r = vsnprintf(string_ptr, r+1, format, p);
+	va_end(p);
+#endif
 
 	if (r < 0)
 		bb_error_msg_and_die(bb_msg_memory_exhausted);
 	return string_ptr;
 }
 
+#if 0 /* If we will ever meet a libc which hasn't [f]dprintf... */
+int FAST_FUNC fdprintf(int fd, const char *format, ...)
+{
+	va_list p;
+	int r;
+	char *string_ptr;
+
+#if 1
+	// GNU extension
+	va_start(p, format);
+	r = vasprintf(&string_ptr, format, p);
+	va_end(p);
+#else
+	// Bloat for systems that haven't got the GNU extension.
+	va_start(p, format);
+	r = vsnprintf(NULL, 0, format, p) + 1;
+	va_end(p);
+	string_ptr = malloc(r);
+	if (string_ptr) {
+		va_start(p, format);
+		r = vsnprintf(string_ptr, r, format, p);
+		va_end(p);
+	}
+#endif
+
+	if (r >= 0) {
+		full_write(fd, string_ptr, r);
+		free(string_ptr);
+	}
+	return r;
+}
+#endif
+
 void FAST_FUNC xsetenv(const char *key, const char *value)
 {
 	if (setenv(key, value, 1))
 		bb_error_msg_and_die(bb_msg_memory_exhausted);
-}
-
-/* Handles "VAR=VAL" strings, even those which are part of environ
- * _right now_
- */
-void FAST_FUNC bb_unsetenv(const char *var)
-{
-	char *tp = strchr(var, '=');
-
-	if (!tp) {
-		unsetenv(var);
-		return;
-	}
-
-	/* In case var was putenv'ed, we can't replace '='
-	 * with NUL and unsetenv(var) - it won't work,
-	 * env is modified by the replacement, unsetenv
-	 * sees "VAR" instead of "VAR=VAL" and does not remove it!
-	 * horror :( */
-	tp = xstrndup(var, tp - var);
-	unsetenv(tp);
-	free(tp);
-}
-
-void FAST_FUNC bb_unsetenv_and_free(char *var)
-{
-	bb_unsetenv(var);
-	free(var);
 }
 
 // Die with an error message if we can't set gid.  (Because resource limits may
@@ -368,28 +347,17 @@ void FAST_FUNC xsetuid(uid_t uid)
 	if (setuid(uid)) bb_perror_msg_and_die("setuid");
 }
 
-void FAST_FUNC xsetegid(gid_t egid)
-{
-	if (setegid(egid)) bb_perror_msg_and_die("setegid");
-}
-
-void FAST_FUNC xseteuid(uid_t euid)
-{
-	if (seteuid(euid)) bb_perror_msg_and_die("seteuid");
-}
-
 // Die if we can't chdir to a new path.
 void FAST_FUNC xchdir(const char *path)
 {
 	if (chdir(path))
-		bb_perror_msg_and_die("can't change directory to '%s'", path);
+		bb_perror_msg_and_die("chdir(%s)", path);
 }
 
 void FAST_FUNC xchroot(const char *path)
 {
 	if (chroot(path))
-		bb_perror_msg_and_die("can't change root directory to '%s'", path);
-	xchdir("/");
+		bb_perror_msg_and_die("can't change root directory to %s", path);
 }
 
 // Print a warning message if opendir() fails, but don't die.
@@ -423,14 +391,10 @@ int FAST_FUNC xsocket(int domain, int type, int protocol)
 		/* Hijack vaguely related config option */
 #if ENABLE_VERBOSE_RESOLUTION_ERRORS
 		const char *s = "INET";
-# ifdef AF_PACKET
 		if (domain == AF_PACKET) s = "PACKET";
-# endif
-# ifdef AF_NETLINK
 		if (domain == AF_NETLINK) s = "NETLINK";
-# endif
-IF_FEATURE_IPV6(if (domain == AF_INET6) s = "INET6";)
-		bb_perror_msg_and_die("socket(AF_%s,%d,%d)", s, type, protocol);
+USE_FEATURE_IPV6(if (domain == AF_INET6) s = "INET6";)
+		bb_perror_msg_and_die("socket(AF_%s)", s);
 #else
 		bb_perror_msg_and_die("socket");
 #endif
@@ -445,6 +409,21 @@ void FAST_FUNC xbind(int sockfd, struct sockaddr *my_addr, socklen_t addrlen)
 	if (bind(sockfd, my_addr, addrlen)) bb_perror_msg_and_die("bind");
 }
 
+// Call a user supplied reporting function and die with an error message if we
+// can't bind a socket to an address.
+void FAST_FUNC xrbind(int sockfd, struct sockaddr *my_addr, socklen_t addrlen,
+	void (*reportf)(int err))
+{
+	if (bind(sockfd, my_addr, addrlen)) {
+		if (reportf) {
+			int t_errno= errno;
+			reportf(t_errno);
+			errno= t_errno;
+		}
+		bb_perror_msg_and_die("bind");
+	}
+}
+
 // Die with an error message if we can't listen for connections on a socket.
 void FAST_FUNC xlisten(int s, int backlog)
 {
@@ -453,7 +432,7 @@ void FAST_FUNC xlisten(int s, int backlog)
 
 /* Die with an error message if sendto failed.
  * Return bytes sent otherwise  */
-ssize_t FAST_FUNC xsendto(int s, const void *buf, size_t len, const struct sockaddr *to,
+ssize_t FAST_FUNC xsendto(int s, const  void *buf, size_t len, const struct sockaddr *to,
 				socklen_t tolen)
 {
 	ssize_t ret = sendto(s, buf, len, 0, to, tolen);
@@ -465,21 +444,52 @@ ssize_t FAST_FUNC xsendto(int s, const void *buf, size_t len, const struct socka
 	return ret;
 }
 
+/* Call a user supplied function and die with an error message if sendto failed.
+ * Return bytes sent otherwise  */
+ssize_t FAST_FUNC xrsendto(int s, const  void *buf, size_t len,
+	const struct sockaddr *to, socklen_t tolen,
+	void (*reportf)(int err))
+{
+	ssize_t ret = sendto(s, buf, len, 0, to, tolen);
+	if (ret < 0) {
+		if (reportf) {
+			int t_errno= errno;
+			reportf(t_errno);
+			t_errno= errno;
+		}
+		if (ENABLE_FEATURE_CLEAN_UP)
+			close(s);
+		bb_perror_msg_and_die("sendto");
+	}
+	return ret;
+}
+
+/* Call a user supplied function with an error message if sendto failed.
+ * Return bytes sent otherwise  */
+ssize_t FAST_FUNC rsendto(int s, const  void *buf, size_t len,
+	const struct sockaddr *to, socklen_t tolen,
+	void (*reportf)(int err))
+{
+	ssize_t ret = sendto(s, buf, len, 0, to, tolen);
+	if (ret < 0) {
+		int t_errno= errno;
+		if (reportf) {
+			reportf(t_errno);
+		}
+		if (ENABLE_FEATURE_CLEAN_UP)
+			close(s);
+		errno= t_errno;
+		bb_perror_msg("sendto");
+		errno= t_errno;
+	}
+	return ret;
+}
+
 // xstat() - a stat() which dies on failure with meaningful error message
 void FAST_FUNC xstat(const char *name, struct stat *stat_buf)
 {
 	if (stat(name, stat_buf))
 		bb_perror_msg_and_die("can't stat '%s'", name);
-}
-
-void FAST_FUNC xfstat(int fd, struct stat *stat_buf, const char *errmsg)
-{
-	/* errmsg is usually a file name, but not always:
-	 * xfstat may be called in a spot where file name is no longer
-	 * available, and caller may give e.g. "can't stat input file" string.
-	 */
-	if (fstat(fd, stat_buf))
-		bb_simple_perror_msg_and_die(errmsg);
 }
 
 // selinux_or_die() - die if SELinux is disabled.
@@ -563,88 +573,5 @@ int FAST_FUNC bb_xioctl(int fd, unsigned request, void *argp)
 	if (ret < 0)
 		bb_perror_msg_and_die("ioctl %#x failed", request);
 	return ret;
-}
-#endif
-
-char* FAST_FUNC xmalloc_ttyname(int fd)
-{
-	char buf[128];
-	int r = ttyname_r(fd, buf, sizeof(buf) - 1);
-	if (r)
-		return NULL;
-	return xstrdup(buf);
-}
-
-void FAST_FUNC generate_uuid(uint8_t *buf)
-{
-	/* http://www.ietf.org/rfc/rfc4122.txt
-	 *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-	 * |                          time_low                             |
-	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-	 * |       time_mid                |         time_hi_and_version   |
-	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-	 * |clk_seq_and_variant            |         node (0-1)            |
-	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-	 * |                         node (2-5)                            |
-	 * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-	 * IOW, uuid has this layout:
-	 * uint32_t time_low (big endian)
-	 * uint16_t time_mid (big endian)
-	 * uint16_t time_hi_and_version (big endian)
-	 *  version is a 4-bit field:
-	 *   1 Time-based
-	 *   2 DCE Security, with embedded POSIX UIDs
-	 *   3 Name-based (MD5)
-	 *   4 Randomly generated
-	 *   5 Name-based (SHA-1)
-	 * uint16_t clk_seq_and_variant (big endian)
-	 *  variant is a 3-bit field:
-	 *   0xx Reserved, NCS backward compatibility
-	 *   10x The variant specified in rfc4122
-	 *   110 Reserved, Microsoft backward compatibility
-	 *   111 Reserved for future definition
-	 * uint8_t node[6]
-	 *
-	 * For version 4, these bits are set/cleared:
-	 * time_hi_and_version & 0x0fff | 0x4000
-	 * clk_seq_and_variant & 0x3fff | 0x8000
-	 */
-	pid_t pid;
-	int i;
-
-	i = open("/dev/urandom", O_RDONLY);
-	if (i >= 0) {
-		read(i, buf, 16);
-		close(i);
-	}
-	/* Paranoia. /dev/urandom may be missing.
-	 * rand() is guaranteed to generate at least [0, 2^15) range,
-	 * but lowest bits in some libc are not so "random".  */
-	srand(monotonic_us()); /* pulls in printf */
-	pid = getpid();
-	while (1) {
-		for (i = 0; i < 16; i++)
-			buf[i] ^= rand() >> 5;
-		if (pid == 0)
-			break;
-		srand(pid);
-		pid = 0;
-	}
-
-	/* version = 4 */
-	buf[4 + 2    ] = (buf[4 + 2    ] & 0x0f) | 0x40;
-	/* variant = 10x */
-	buf[4 + 2 + 2] = (buf[4 + 2 + 2] & 0x3f) | 0x80;
-}
-
-#if BB_MMU
-pid_t FAST_FUNC xfork(void)
-{
-	pid_t pid;
-	pid = fork();
-	if (pid < 0) /* wtf? */
-		bb_perror_msg_and_die("vfork"+1);
-	return pid;
 }
 #endif
