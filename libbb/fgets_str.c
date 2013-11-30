@@ -5,12 +5,12 @@
  * Copyright (C) many different people.
  * If you wrote this, please acknowledge your work.
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
 #include "libbb.h"
 
-static char *xmalloc_fgets_internal(FILE *file, const char *terminating_string, int chop_off, size_t *maxsz_p)
+static char *xmalloc_fgets_internal(FILE *file, const char *terminating_string, int chop_off)
 {
 	char *linebuf = NULL;
 	const int term_length = strlen(terminating_string);
@@ -18,7 +18,6 @@ static char *xmalloc_fgets_internal(FILE *file, const char *terminating_string, 
 	int linebufsz = 0;
 	int idx = 0;
 	int ch;
-	size_t maxsz = *maxsz_p;
 
 	while (1) {
 		ch = fgetc(file);
@@ -31,11 +30,6 @@ static char *xmalloc_fgets_internal(FILE *file, const char *terminating_string, 
 		if (idx >= linebufsz) {
 			linebufsz += 200;
 			linebuf = xrealloc(linebuf, linebufsz);
-			if (idx >= maxsz) {
-				linebuf[idx] = ch;
-				idx++;
-				break;
-			}
 		}
 
 		linebuf[idx] = ch;
@@ -54,7 +48,6 @@ static char *xmalloc_fgets_internal(FILE *file, const char *terminating_string, 
 	/* Grow/shrink *first*, then store NUL */
 	linebuf = xrealloc(linebuf, idx + 1);
 	linebuf[idx] = '\0';
-	*maxsz_p = idx;
 	return linebuf;
 }
 
@@ -64,23 +57,10 @@ static char *xmalloc_fgets_internal(FILE *file, const char *terminating_string, 
  * Return NULL if EOF is reached immediately.  */
 char* FAST_FUNC xmalloc_fgets_str(FILE *file, const char *terminating_string)
 {
-	size_t maxsz = INT_MAX - 4095;
-	return xmalloc_fgets_internal(file, terminating_string, 0, &maxsz);
-}
-
-char* FAST_FUNC xmalloc_fgets_str_len(FILE *file, const char *terminating_string, size_t *maxsz_p)
-{
-	size_t maxsz;
-
-	if (!maxsz_p) {
-		maxsz = INT_MAX - 4095;
-		maxsz_p = &maxsz;
-	}
-	return xmalloc_fgets_internal(file, terminating_string, 0, maxsz_p);
+	return xmalloc_fgets_internal(file, terminating_string, 0);
 }
 
 char* FAST_FUNC xmalloc_fgetline_str(FILE *file, const char *terminating_string)
 {
-	size_t maxsz = INT_MAX - 4095;
-	return xmalloc_fgets_internal(file, terminating_string, 1, &maxsz);
+	return xmalloc_fgets_internal(file, terminating_string, 1);
 }

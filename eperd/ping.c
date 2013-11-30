@@ -8,10 +8,6 @@
  */
 
 #include "libbb.h"
-<<<<<<< HEAD
-#include "atlas_probe.h"
-=======
->>>>>>> ripe-atlas-fw-4550
 #include <event2/dns.h>
 #include <event2/event.h>
 #include <event2/event_struct.h>
@@ -168,16 +164,6 @@ msecstotv(time_t msecs, struct timeval *tv)
 	tv->tv_usec = msecs % 1000 * 1000;
 }
 
-<<<<<<< HEAD
-/* The time since 'tv' in microseconds */
-static time_t
-tvtousecs (struct timeval *tv)
-{
-	return tv->tv_sec * 1000000.0 + tv->tv_usec;
-}
-
-=======
->>>>>>> ripe-atlas-fw-4550
 static void add_str(struct pingstate *state, const char *str)
 {
 	size_t len;
@@ -264,10 +250,7 @@ static void report(struct pingstate *state)
 	fprintf(fh, ", \"result\": [ %s ] }\n", state->result);
 	free(state->result);
 	state->result= NULL;
-<<<<<<< HEAD
-=======
 
->>>>>>> ripe-atlas-fw-4550
 	state->busy= 0;
 
 	if (state->out_filename)
@@ -285,11 +268,8 @@ static void ping_cb(int result, int bytes,
 	char namebuf[NI_MAXHOST];
 	char line[256];
 
-<<<<<<< HEAD
-=======
 	(void)socklen;	/* Suppress GCC unused parameter warning */
 
->>>>>>> ripe-atlas-fw-4550
 	pingstate= arg;
 
 #if 0
@@ -560,19 +540,13 @@ static void ping_xmit(struct pingstate *host)
 			(struct sockaddr *)&host->loc_sin6, host->loc_socklen,
 			0, host->rcvd_ttl, NULL,
 			host);
-<<<<<<< HEAD
-=======
 		if (host->dns_res)
 		{
 			evutil_freeaddrinfo(host->dns_res);
 			host->dns_res= NULL;
 		}
->>>>>>> ripe-atlas-fw-4550
 		if (host->base->done)
 			host->base->done(host);
-
-		/* Fake packet sent to kill timer */
-	    	host->sentpkts++;
 
 		return;
 	}
@@ -654,6 +628,10 @@ static void ping_xmit(struct pingstate *host)
 			errno, 0, NULL,
 			host);
 	}
+
+
+	/* Add the timer to handle no reply condition in the given timeout */
+	evtimer_add(&host->ping_timer, &host->base->tv_interval);
 }
 
 
@@ -675,11 +653,6 @@ static void noreply_callback(int __attribute((unused)) unused, const short __att
 	}
 
 	ping_xmit(host);
-
-	if (host->sentpkts <= host->maxpkts)
-	{
-		evtimer_add(&host->ping_timer, &host->base->tv_interval);
-	}
 }
 
 /*
@@ -775,20 +748,10 @@ printf("ready_callback4: too short\n");
 	  {
 	    /* Use the User Data to relate Echo Request/Reply and evaluate the Round Trip Time */
 	    struct timeval elapsed;             /* response time */
-<<<<<<< HEAD
-	    time_t usecs;
-=======
->>>>>>> ripe-atlas-fw-4550
 
 	    /* Compute time difference to calculate the round trip */
 	    evutil_timersub (&now, &data->ts, &elapsed);
 
-<<<<<<< HEAD
-	    /* Update counters */
-	    usecs = tvtousecs(&elapsed);
-
-=======
->>>>>>> ripe-atlas-fw-4550
 	    /* Set destination address of packet as local address */
 	    sin4p= &loc_sin4;
 	    memset(sin4p, '\0', sizeof(*sin4p));
@@ -900,20 +863,10 @@ static void ready_callback6 (int __attribute((unused)) unused,
 	  {
 	    /* Use the User Data to relate Echo Request/Reply and evaluate the Round Trip Time */
 	    struct timeval elapsed;             /* response time */
-<<<<<<< HEAD
-	    time_t usecs;
-=======
->>>>>>> ripe-atlas-fw-4550
 
 	    /* Compute time difference to calculate the round trip */
 	    evutil_timersub (&now, &data->ts, &elapsed);
 
-<<<<<<< HEAD
-	    /* Update counters */
-	    usecs = tvtousecs(&elapsed);
-
-=======
->>>>>>> ripe-atlas-fw-4550
 	    /* Set destination address of packet as local address */
 	    memset(&loc_sin6, '\0', sizeof(loc_sin6));
 	    for (cmsgptr= CMSG_FIRSTHDR(&msg); cmsgptr; 
@@ -1074,11 +1027,7 @@ static void *ping_init(int __attribute((unused)) argc, char *argv[],
 	{
 		if (!validate_filename(out_filename, SAFE_PREFIX))
 		{
-<<<<<<< HEAD
-			crondlog(LVL8 "insecure file '%s' allowed %s", out_filename, SAFE_PREFIX);
-=======
 			crondlog(LVL8 "insecure file '%s'", out_filename);
->>>>>>> ripe-atlas-fw-4550
 			return NULL;
 		}
 		fh= fopen(out_filename, "a");
@@ -1091,8 +1040,6 @@ static void *ping_init(int __attribute((unused)) argc, char *argv[],
 		fclose(fh);
 	}
 
-<<<<<<< HEAD
-=======
 	if (str_Atlas)
 	{
 		if (!validate_atlas_id(str_Atlas))
@@ -1102,7 +1049,6 @@ static void *ping_init(int __attribute((unused)) argc, char *argv[],
 		}
 	}
 
->>>>>>> ripe-atlas-fw-4550
 	af= AF_UNSPEC;
 	if (opt & opt_4)
 		af= AF_INET;
@@ -1190,9 +1136,6 @@ static void ping_start2(void *state)
 	pingstate->cursize= pingstate->maxsize;
 
 	ping_xmit(pingstate);
-
-	/* Add the timer to handle no reply condition in the given timeout */
-	evtimer_add(&pingstate->ping_timer, &pingstate->base->tv_interval);
 }
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
@@ -1269,20 +1212,13 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 static void ping_start(void *state)
 {
 	struct pingstate *pingstate;
-<<<<<<< HEAD
-	struct evdns_getaddrinfo_request *evdns_req;
-=======
->>>>>>> ripe-atlas-fw-4550
 	struct evutil_addrinfo hints;
 
 	pingstate= state;
 
-<<<<<<< HEAD
-=======
 	if (pingstate->busy)
 		return;
 
->>>>>>> ripe-atlas-fw-4550
 	if (pingstate->result) free(pingstate->result);
 	pingstate->resmax= 80;
 	pingstate->result= xmalloc(pingstate->resmax);
@@ -1308,13 +1244,8 @@ static void ping_start(void *state)
 	hints.ai_family= pingstate->af;
 	printf("hostname '%s', family %d\n",
 		pingstate->hostname, hints.ai_family);
-<<<<<<< HEAD
-	evdns_req= evdns_getaddrinfo(DnsBase, pingstate->hostname,
-		NULL, &hints, dns_cb, pingstate);
-=======
 	(void) evdns_getaddrinfo(DnsBase, pingstate->hostname, NULL,
 		&hints, dns_cb, pingstate);
->>>>>>> ripe-atlas-fw-4550
 }
 
 static int ping_delete(void *state)

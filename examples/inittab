@@ -15,7 +15,10 @@
 #	the specified process to run on.  The contents of this field are
 #	appended to "/dev/" and used as-is.  There is no need for this field to
 #	be unique, although if it isn't you may have strange results.  If this
-#	field is left blank, then the init's stdin/out will be used.
+#	field is left blank, it is completely ignored.  Also note that if
+#	BusyBox detects that a serial console is in use, then all entries
+#	containing non-empty id fields will be ignored.  BusyBox init does
+#	nothing with utmp.  We don't need no stinkin' utmp.
 #
 # <runlevels>: The runlevels field is completely ignored.
 #
@@ -27,7 +30,7 @@
 #       console." and then waits for the user to press enter before starting
 #       the specified process.
 #
-#       Note: unrecognized actions (like initdefault) will cause init to emit
+#       Note: unrecognised actions (like initdefault) will cause init to emit
 #       an error message, and then go along with its business.
 #
 # <process>: Specifies the process to be executed and it's command line.
@@ -40,6 +43,9 @@
 #         ::shutdown:/sbin/swapoff -a
 #         ::shutdown:/bin/umount -a -r
 #         ::restart:/sbin/init
+#
+# if it detects that /dev/console is _not_ a serial console, it will
+# also run:
 #         tty2::askfirst:/bin/sh
 #         tty3::askfirst:/bin/sh
 #         tty4::askfirst:/bin/sh
@@ -81,3 +87,4 @@ tty5::respawn:/sbin/getty 38400 tty6
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/umount -a -r
 ::shutdown:/sbin/swapoff -a
+

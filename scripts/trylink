@@ -85,13 +85,6 @@ LDLIBS="$7"
 # The --sort-section option is not supported by older versions of ld
 SORT_SECTION=`check_cc "-Wl,--sort-section,alignment" ""`
 
-START_GROUP="-Wl,--start-group"
-END_GROUP="-Wl,--end-group"
-INFO_OPTS="-Wl,--warn-common -Wl,-Map,$EXE.map -Wl,--verbose"
-
-# gold may not support --sort-common (yet)
-SORT_COMMON=`check_cc "-Wl,--sort-common" ""`
-
 # Static linking against glibc produces buggy executables
 # (glibc does not cope well with ld --gc-sections).
 # See sources.redhat.com/bugzilla/show_bug.cgi?id=3400
@@ -106,25 +99,20 @@ else
 fi
 )`
 
-# The --gc-sections option is not supported by older versions of ld
-if test -n "$GC_SECTIONS"; then
-    GC_SECTIONS=`check_cc "$GC_SECTIONS" ""`
-fi
-
 # Sanitize lib list (dups, extra spaces etc)
 LDLIBS=`echo "$LDLIBS" | xargs -n1 | sort | uniq | xargs`
 
 # First link with all libs. If it fails, bail out
 echo "Trying libraries: $LDLIBS"
 # "lib1 lib2 lib3" -> "-llib1 -llib2 -llib3"
-l_list=`echo " $LDLIBS " | sed -e 's: \([^- ][^ ]*\): -l\1:g'`
-test "x$l_list" != "x" && l_list="$START_GROUP $l_list $END_GROUP"
+l_list=`echo "$LDLIBS" | sed -e 's/ / -l/g' -e 's/^/-l/' -e 's/^-l$//'`
+test "x$l_list" != "x" && l_list="-Wl,--start-group $l_list -Wl,--end-group"
 try $CC $CFLAGS $LDFLAGS \
 	-o $EXE \
-	$SORT_COMMON \
+	-Wl,--sort-common \
 	$SORT_SECTION \
 	$GC_SECTIONS \
-	$START_GROUP $O_FILES $A_FILES $END_GROUP \
+	-Wl,--start-group $O_FILES $A_FILES -Wl,--end-group \
 	$l_list \
 || {
     echo "Failed: $l_list"
@@ -141,15 +129,15 @@ while test "$LDLIBS"; do
     for one in $LDLIBS; do
 	without_one=`echo " $LDLIBS " | sed "s/ $one / /g" | xargs`
 	# "lib1 lib2 lib3" -> "-llib1 -llib2 -llib3"
-	l_list=`echo " $without_one " | sed -e 's: \([^- ][^ ]*\): -l\1:g'`
-	test x"$l_list" != x"" && l_list="$START_GROUP $l_list $END_GROUP"
+	l_list=`echo "$without_one" | sed -e 's/ / -l/g' -e 's/^/-l/' -e 's/^-l$//'`
+	test x"$l_list" != x"" && l_list="-Wl,--start-group $l_list -Wl,--end-group"
 	$debug && echo "Trying -l options: '$l_list'"
 	try $CC $CFLAGS $LDFLAGS \
 		-o $EXE \
-		$SORT_COMMON \
+		-Wl,--sort-common \
 		$SORT_SECTION \
 		$GC_SECTIONS \
-		$START_GROUP $O_FILES $A_FILES $END_GROUP \
+		-Wl,--start-group $O_FILES $A_FILES -Wl,--end-group \
 		$l_list
 	if test $? = 0; then
 	    echo " Library $one is not needed, excluding it"
@@ -172,18 +160,20 @@ done
 
 # Make the binary with final, minimal list of libs
 echo "Final link with: ${LDLIBS:-<none>}"
-l_list=`echo " $LDLIBS " | sed -e 's: \([^- ][^ ]*\): -l\1:g'`
-test "x$l_list" != "x" && l_list="$START_GROUP $l_list $END_GROUP"
+l_list=`echo "$LDLIBS" | sed -e 's/ / -l/g' -e 's/^/-l/' -e 's/^-l$//'`
+test "x$l_list" != "x" && l_list="-Wl,--start-group $l_list -Wl,--end-group"
 # --verbose gives us gobs of info to stdout (e.g. linker script used)
 if ! test -f busybox_ldscript; then
     try $CC $CFLAGS $LDFLAGS \
 	    -o $EXE \
-	    $SORT_COMMON \
+	    -Wl,--sort-common \
 	    $SORT_SECTION \
 	    $GC_SECTIONS \
-	    $START_GROUP $O_FILES $A_FILES $END_GROUP \
+	    -Wl,--start-group $O_FILES $A_FILES -Wl,--end-group \
 	    $l_list \
-	    $INFO_OPTS \
+	    -Wl,--warn-common \
+	    -Wl,-Map,$EXE.map \
+	    -Wl,--verbose \
     || {
 	cat $EXE.out
 	exit 1
@@ -198,13 +188,15 @@ else
     # Hmm, "ld --sort-section alignment" should do it too.
     try $CC $CFLAGS $LDFLAGS \
 	    -o $EXE \
-	    $SORT_COMMON \
+	    -Wl,--sort-common \
 	    $SORT_SECTION \
 	    $GC_SECTIONS \
 	    -Wl,-T,busybox_ldscript \
-	    $START_GROUP $O_FILES $A_FILES $END_GROUP \
+	    -Wl,--start-group $O_FILES $A_FILES -Wl,--end-group \
 	    $l_list \
-	    $INFO_OPTS \
+	    -Wl,--warn-common \
+	    -Wl,-Map,$EXE.map \
+	    -Wl,--verbose \
     || {
 	cat $EXE.out
 	exit 1
@@ -231,11 +223,13 @@ if test "$CONFIG_BUILD_LIBBUSYBOX" = y; then
 	    -Wl,-z,combreloc \
 	    -Wl,-soname="libbusybox.so.$BB_VER" \
 	    -Wl,--undefined=lbb_main \
-	    $SORT_COMMON \
+	    -Wl,--sort-common \
 	    $SORT_SECTION \
-	    $START_GROUP $A_FILES $END_GROUP \
+	    -Wl,--start-group $A_FILES -Wl,--end-group \
 	    $l_list \
-	    $INFO_OPTS \
+	    -Wl,--warn-common \
+	    -Wl,-Map,$EXE.map \
+	    -Wl,--verbose \
     || {
 	echo "Linking $EXE failed"
 	cat $EXE.out
@@ -250,13 +244,14 @@ if test "$CONFIG_FEATURE_SHARED_BUSYBOX" = y; then
     EXE="$sharedlib_dir/busybox_unstripped"
     try $CC $CFLAGS $LDFLAGS \
 	    -o $EXE \
-	    $SORT_COMMON \
+	    -Wl,--sort-common \
 	    $SORT_SECTION \
 	    $GC_SECTIONS \
-	    $START_GROUP $O_FILES $END_GROUP \
+	    -Wl,--start-group $O_FILES -Wl,--end-group \
 	    -L"$sharedlib_dir" -lbusybox \
-	    $l_list \
-	    $INFO_OPTS \
+	    -Wl,--warn-common \
+	    -Wl,-Map,$EXE.map \
+	    -Wl,--verbose \
     || {
 	echo "Linking $EXE failed"
 	cat $EXE.out
@@ -288,7 +283,7 @@ int main(int argc, char **argv)
 	EXE="$sharedlib_dir/$name"
 	try $CC $CFLAGS $LDFLAGS "$sharedlib_dir/applet.c" \
 		-o $EXE \
-		$SORT_COMMON \
+		-Wl,--sort-common \
 		$SORT_SECTION \
 		$GC_SECTIONS \
 		-L"$sharedlib_dir" -lbusybox \

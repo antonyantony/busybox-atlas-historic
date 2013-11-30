@@ -1,3 +1,2 @@
-f=$(busybox hostname -f).
-d=$(busybox hostname -d)
-test x"${f#*.}" = x"$d${d:+.}"
+test x$(hostname -d) = x$(busybox hostname -d)
+

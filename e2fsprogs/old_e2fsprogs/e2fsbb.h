@@ -6,8 +6,8 @@
  * instead.  This makes upgrade between e2fsprogs versions easy.
  */
 
-#ifndef E2FSBB_H
-#define E2FSBB_H 1
+#ifndef __E2FSBB_H__
+#define __E2FSBB_H__ 1
 
 #include "libbb.h"
 
@@ -40,4 +40,4 @@ typedef long errcode_t;
 #define WORDS_BIGENDIAN 1
 #endif
 
-#endif
+#endif /* __E2FSBB_H__ */

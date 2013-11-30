@@ -1,15 +1,8 @@
 /* vi: set sw=4 ts=4: */
-/* fdformat.c  -  Low-level formats a floppy disk - Werner Almesberger
- * 5 July 2003 -- modified for Busybox by Erik Andersen
- *
- * Licensed under GPLv2, see file LICENSE in this source tree.
- */
+/* fdformat.c  -  Low-level formats a floppy disk - Werner Almesberger */
 
-//usage:#define fdformat_trivial_usage
-//usage:       "[-n] DEVICE"
-//usage:#define fdformat_full_usage "\n\n"
-//usage:       "Format floppy disk\n"
-//usage:     "\n	-n	Don't verify after format"
+/* 5 July 2003 -- modified for Busybox by Erik Andersen
+ */
 
 #include "libbb.h"
 
@@ -42,7 +35,7 @@ struct format_descr {
 	unsigned int device,head,track;
 };
 #define FDFMTBEG _IO(2,0x47)
-#define FDFMTTRK _IOW(2,0x48, struct format_descr)
+#define	FDFMTTRK _IOW(2,0x48, struct format_descr)
 #define FDFMTEND _IO(2,0x49)
 #define FDGETPRM _IOR(2, 0x04, struct floppy_struct)
 #define FD_FILL_BYTE 0xF6 /* format fill byte. */
@@ -72,7 +65,7 @@ int fdformat_main(int argc UNUSED_PARAM, char **argv)
 	/* original message was: "Could not determine current format type" */
 	xioctl(fd, FDGETPRM, &param);
 
-	printf("%s-sided, %u tracks, %u sec/track. Total capacity %d kB\n",
+	printf("%s-sided, %d tracks, %d sec/track. Total capacity %d kB\n",
 		(param.head == 2) ? "Double" : "Single",
 		param.track, param.sect, param.size >> 1);
 
@@ -116,7 +109,7 @@ int fdformat_main(int argc UNUSED_PARAM, char **argv)
 			/* Check backwards so we don't need a counter */
 			while (--read_bytes >= 0) {
 				if (data[read_bytes] != FD_FILL_BYTE) {
-					printf("bad data in cyl %d\nContinuing... ", cyl);
+					 printf("bad data in cyl %d\nContinuing... ", cyl);
 				}
 			}
 		}

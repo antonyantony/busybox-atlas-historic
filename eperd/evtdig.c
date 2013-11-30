@@ -50,10 +50,6 @@
 #define O_RESOLV_CONF  1003
 #define O_PREPEND_PROBE_ID  1004
 #define O_EVDNS 1005
-<<<<<<< HEAD
-#define O_NO_EVDNS 1006
-=======
->>>>>>> ripe-atlas-fw-4550
 
 #define DNS_FLAG_RD 0x0100
 
@@ -78,11 +74,6 @@
 #define STATUS_TCP_CONNECTED 		1003
 #define STATUS_TCP_WRITE 		1004
 #define STATUS_NEXT_QUERY		1005
-<<<<<<< HEAD
-#define STATUS_RETRANSMIT_QUERY		1006
-
-=======
->>>>>>> ripe-atlas-fw-4550
 #define STATUS_FREE 			0
 
 // seems T_DNSKEY is not defined header files of lenny and sdk
@@ -196,11 +187,6 @@ struct query_state {
 	int opt_rd;
 	int opt_prepend_probe_id;
 	int opt_evdns;
-<<<<<<< HEAD
-	 
-	int retry;
-=======
->>>>>>> ripe-atlas-fw-4550
 
 	char * str_Atlas; 
 	u_int16_t qtype;
@@ -350,10 +336,6 @@ static struct option longopts[]=
 	{ "noabuf", no_argument, NULL, 1002 },
 
 	{ "evdns", no_argument, NULL, O_EVDNS },
-<<<<<<< HEAD
-	{ "noevdns", no_argument, NULL, O_NO_EVDNS },
-=======
->>>>>>> ripe-atlas-fw-4550
 	{ "out-file", required_argument, NULL, 'O' },
 	{ "p_probe_id", no_argument, NULL, O_PREPEND_PROBE_ID },
 	{ NULL, }
@@ -373,11 +355,6 @@ static void process_reply(void * arg, int nrecv, struct timeval now, int af, voi
 static void mk_dns_buff(struct query_state *qry,  u_char *packet);
 int ip_addr_cmp (u_int16_t af_a, void *a, u_int16_t af_b, void *b);
 static void udp_dns_cb(int err, struct evutil_addrinfo *ev_res, struct query_state *qry);
-<<<<<<< HEAD
-static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
-static void free_qry_inst(struct query_state *qry);
-=======
->>>>>>> ripe-atlas-fw-4550
 
 /* move the next functions from tdig.c */
 u_int32_t get32b (char *p);
@@ -400,11 +377,7 @@ int evtdig_main(int argc, char **argv)
 		crondlog(LVL9 "event_base_new failed"); /* exits */
 	}
 
-<<<<<<< HEAD
-	qry = tdig_init(argc, argv, NULL);
-=======
 	qry = tdig_init(argc, argv, local_exit);
->>>>>>> ripe-atlas-fw-4550
 	if(!qry) {
 		crondlog(DIE9 "evdns_base_new failed"); /* exits */
 		event_base_free	(EventBase);
@@ -452,11 +425,7 @@ void print_txt_json(unsigned char *rdata, int txt_len, FILE *fh)
 
 static void local_exit(void *state UNUSED_PARAM)
 {
-<<<<<<< HEAD
-	//fprintf(stderr, "And we are done\n");
-=======
 	fprintf(stderr, "And we are done\n");
->>>>>>> ripe-atlas-fw-4550
 	exit(0);
 }
 
@@ -748,13 +717,6 @@ static void tdig_send_query_callback(int unused UNUSED_PARAM, const short event 
 
 static void next_qry_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h) {
 	struct query_state *qry = h;
-<<<<<<< HEAD
-	BLURT(LVL5 "next query for %s retry %d",  qry->server_name, qry->retry);
-			
-	tdig_start(qry);  
-}
-
-=======
 	BLURT(LVL5 "next query for %s",  qry->server_name);
 	tdig_start(qry);  
 }
@@ -772,7 +734,6 @@ static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_
 	return;
 } 
 
->>>>>>> ripe-atlas-fw-4550
 static void tcp_timeout_callback (int __attribute((unused)) unused, 
 		const short __attribute((unused)) event, void *s)
 {
@@ -785,10 +746,6 @@ static void tcp_reporterr(struct tu_env *env, enum tu_err cause,
                 const char *str)
 {
 	struct query_state * qry;
-<<<<<<< HEAD
-	struct timeval asap = { 0, 0 };
-=======
->>>>>>> ripe-atlas-fw-4550
 	qry = ENV2QRY(env);
 
        // if (env != &state->tu_env) abort();  // Why do i need this? AA
@@ -823,18 +780,7 @@ static void tcp_reporterr(struct tu_env *env, enum tu_err cause,
                 crondlog(DIE9 "reporterr: bad cause %d", cause);
 		break;
         }
-<<<<<<< HEAD
-	if (qry->retry < 10) {
-		qry->retry++;
-		free_qry_inst(qry);
-		qry->qst = STATUS_RETRANSMIT_QUERY;
-		evtimer_add(&qry->next_qry_timer, &asap);	
-	} else {
-		printReply (qry, 0, NULL);
-	}
-=======
 	printReply (qry, 0, NULL);
->>>>>>> ripe-atlas-fw-4550
 }
 
 static void tcp_dnscount(struct tu_env *env, int count)
@@ -1098,10 +1044,6 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	qry->str_Atlas = NULL;
 	tdig_base->activeqry++;
 	qry->qst = 0;
-<<<<<<< HEAD
-	qry->retry  = 0;
-=======
->>>>>>> ripe-atlas-fw-4550
 	qry->wire_size = 0;
 	qry->triptime = 0;
 	qry->opt_edns0 = 512; 
@@ -1110,11 +1052,7 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	qry->opt_qbuf = 0; 
 	qry->opt_abuf = 1; 
 	qry->opt_rd = 0;
-<<<<<<< HEAD
-	qry->opt_evdns = 1;
-=======
 	qry->opt_evdns = 0;
->>>>>>> ripe-atlas-fw-4550
 	qry->opt_prepend_probe_id = 0;
 	qry->ressave = NULL;
 	qry->ressent = NULL;
@@ -1156,8 +1094,6 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 				break;
 
 			case 'A':
-<<<<<<< HEAD
-=======
 				if (!validate_atlas_id(optarg))
 				{
 					crondlog(LVL8 "bad atlas ID '%s'",
@@ -1165,7 +1101,6 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 					tdig_delete(qry);
 					return NULL;
 				}
->>>>>>> ripe-atlas-fw-4550
 				qry->str_Atlas = strdup(optarg);
 				break;
 			case 'b':
@@ -1236,13 +1171,6 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 				qry->opt_evdns = 1;
 				break;
 
-<<<<<<< HEAD
-			case O_NO_EVDNS:
-				qry->opt_evdns = 0;
-				break;
-
-=======
->>>>>>> ripe-atlas-fw-4550
 			case (100000 + T_A):
 				qry->qtype = T_A;
 				qry->qclass = C_IN;
@@ -1370,11 +1298,7 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	if (qry->out_filename &&
 		!validate_filename(qry->out_filename, SAFE_PREFIX))
 	{
-<<<<<<< HEAD
-		crondlog(LVL8 "insecure file '%s' allowed %s", qry->out_filename, SAFE_PREFIX);
-=======
 		crondlog(LVL8 "insecure file '%s'", qry->out_filename);
->>>>>>> ripe-atlas-fw-4550
 		tdig_delete(qry);
 		return NULL;
 	}
@@ -1526,12 +1450,7 @@ void tdig_start (struct query_state *qry)
 	switch(qry->qst)
 	{
 		case STATUS_NEXT_QUERY :
-<<<<<<< HEAD
-		case STATUS_FREE :
-		case STATUS_RETRANSMIT_QUERY:
-=======
 		case  STATUS_FREE :
->>>>>>> ripe-atlas-fw-4550
 			break;
 		default:
 			printErrorQuick(qry);
@@ -1767,32 +1686,6 @@ static void free_qry_inst(struct query_state *qry)
 	
 }
 
-<<<<<<< HEAD
-/* The callback to handle timeouts due to destination host unreachable condition */
-static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
-{
-	struct timeval asap = { 0, 0 };
-	struct query_state *qry = h;
-	qry->base->timeout++;
-	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
-	buf_add(&qry->err, line, strlen(line));
-
-	BLURT(LVL5 "AAA timeout for %s ", qry->server_name);
-	
-	if (qry->retry < 10) {
-		qry->retry++;
-		free_qry_inst(qry);
-		qry->qst = STATUS_RETRANSMIT_QUERY;
-		evtimer_add(&qry->next_qry_timer, &asap);	
-	} else {
-		printReply (qry, 0, NULL);
-	}
-
-	return;
-} 
-
-=======
->>>>>>> ripe-atlas-fw-4550
 
 static int tdig_delete(void *state)
 {
@@ -1870,17 +1763,6 @@ void printErrorQuick (struct query_state *qry)
 		fh = stdout;
 
 	fprintf(fh, "RESULT { ");
-<<<<<<< HEAD
-	if(qry->str_Atlas) 
-	{
-		JS(id,  qry->str_Atlas);
-	}
-	gettimeofday(&now, NULL);
-	JS1(time, %ld,  now.tv_sec);
-
-	snprintf(line, DEFAULT_LINE_LENGTH, "\"query busy\": \"too frequent. previous one is not done yet\"");
-	fprintf(fh, "\"error\" : { %s }" , line);
-=======
 
 	JS(id, "9202");
 	gettimeofday(&now, NULL);
@@ -1896,7 +1778,6 @@ void printErrorQuick (struct query_state *qry)
 		fprintf(fh, "}" , line);
 	}
 	fprintf(fh, "]");
->>>>>>> ripe-atlas-fw-4550
 
 	fprintf(fh, " }");
 	fprintf(fh, "\n");
@@ -1988,17 +1869,8 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 		JC;
 		JS_NC(qbuf, qry->qbuf.buf );
 	} 
-<<<<<<< HEAD
-      
-	if(qry->retry) {
-		JS1(retry, %d,  qry->retry);
-	}
-
-
-=======
 
       
->>>>>>> ripe-atlas-fw-4550
 	if(result)
 	{
 		dnsR = (struct DNS_HEADER*) result;
@@ -2130,12 +2002,7 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 		}
 
 		fprintf (fh , " }"); //result
-<<<<<<< HEAD
-	}
-
-=======
 	} 
->>>>>>> ripe-atlas-fw-4550
 	if(qry->err.size) 
 	{
 		line[0]  = '\0';

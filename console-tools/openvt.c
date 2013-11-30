@@ -5,20 +5,8 @@
  *  busyboxed by Quy Tonthat <quy@signal3.com>
  *  hacked by Tito <farmatito@tiscali.it>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
-
-//usage:#define openvt_trivial_usage
-//usage:       "[-c N] [-sw] [PROG ARGS]"
-//usage:#define openvt_full_usage "\n\n"
-//usage:       "Start PROG on a new virtual terminal\n"
-//usage:     "\n	-c N	Use specified VT"
-//usage:     "\n	-s	Switch to the VT"
-/* //usage:     "\n	-l	Run PROG as login shell (by prepending '-')" */
-//usage:     "\n	-w	Wait for PROG to exit"
-//usage:
-//usage:#define openvt_example_usage
-//usage:       "openvt 2 /bin/ash\n"
 
 #include <linux/vt.h>
 #include "libbb.h"
@@ -73,7 +61,9 @@ static int get_vt_fd(void)
 	for (fd = 0; fd < 3; fd++)
 		if (!not_vt_fd(fd))
 			return fd;
-	fd = open(DEV_CONSOLE, O_RDONLY | O_NONBLOCK);
+	/* _only_ O_NONBLOCK: ask for neither read nor write perms */
+	/*FIXME: use? device_open(DEV_CONSOLE,0); */
+	fd = open(DEV_CONSOLE, O_NONBLOCK);
 	if (fd >= 0 && !not_vt_fd(fd))
 		return fd;
 	bb_error_msg_and_die("can't find open VT");
@@ -109,7 +99,8 @@ static NOINLINE void vfork_child(char **argv)
 		//bb_error_msg("our pgrp %d", getpgrp());
 		//bb_error_msg("VT's sid %d", tcgetsid(0));
 		//bb_error_msg("VT's pgrp %d", tcgetpgrp(0));
-		BB_EXECVP_or_die(argv);
+		BB_EXECVP(argv[0], argv);
+		bb_perror_msg_and_die("exec %s", argv[0]);
 	}
 }
 
@@ -156,7 +147,9 @@ int openvt_main(int argc UNUSED_PARAM, char **argv)
 
 	if (!argv[0]) {
 		argv--;
-		argv[0] = (char *) get_shell_name();
+		argv[0] = getenv("SHELL");
+		if (!argv[0])
+			argv[0] = (char *) DEFAULT_SHELL;
 		/*argv[1] = NULL; - already is */
 	}
 

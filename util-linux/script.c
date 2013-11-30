@@ -6,23 +6,19 @@
  *
  * Based on code from util-linux v 2.12r
  * Copyright (c) 1980
- * The Regents of the University of California.  All rights reserved.
+ *	The Regents of the University of California.  All rights reserved.
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file License in this tarball for details.
  */
 
-//usage:#define script_trivial_usage
-//usage:       "[-afq" IF_SCRIPTREPLAY("t") "] [-c PROG] [OUTFILE]"
-//usage:#define script_full_usage "\n\n"
-//usage:       "	-a	Append output"
-//usage:     "\n	-c PROG	Run PROG, not shell"
-//usage:     "\n	-f	Flush output after each write"
-//usage:     "\n	-q	Quiet"
-//usage:	IF_SCRIPTREPLAY(
-//usage:     "\n	-t	Send timing to stderr"
-//usage:	)
-
 #include "libbb.h"
+
+static smallint fd_count = 2;
+
+static void handle_sigchld(int sig UNUSED_PARAM)
+{
+	fd_count = 0;
+}
 
 int script_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int script_main(int argc UNUSED_PARAM, char **argv)
@@ -40,44 +36,38 @@ int script_main(int argc UNUSED_PARAM, char **argv)
 	const char *shell;
 	char shell_opt[] = "-i";
 	char *shell_arg = NULL;
-	enum {
-		OPT_a = (1 << 0),
-		OPT_c = (1 << 1),
-		OPT_f = (1 << 2),
-		OPT_q = (1 << 3),
-		OPT_t = (1 << 4),
-	};
 
-#if ENABLE_LONG_OPTS
+#if ENABLE_GETOPT_LONG
 	static const char getopt_longopts[] ALIGN1 =
 		"append\0"  No_argument       "a"
 		"command\0" Required_argument "c"
 		"flush\0"   No_argument       "f"
 		"quiet\0"   No_argument       "q"
-		IF_SCRIPTREPLAY("timing\0" No_argument "t")
 		;
 
 	applet_long_options = getopt_longopts;
 #endif
-
 	opt_complementary = "?1"; /* max one arg */
-	opt = getopt32(argv, "ac:fq" IF_SCRIPTREPLAY("t") , &shell_arg);
+	opt = getopt32(argv, "ac:fq", &shell_arg);
 	//argc -= optind;
 	argv += optind;
 	if (argv[0]) {
 		fname = argv[0];
 	}
 	mode = O_CREAT|O_TRUNC|O_WRONLY;
-	if (opt & OPT_a) {
+	if (opt & 1) {
 		mode = O_CREAT|O_APPEND|O_WRONLY;
 	}
-	if (opt & OPT_c) {
+	if (opt & 2) {
 		shell_opt[1] = 'c';
 	}
-	if (!(opt & OPT_q)) {
+	if (!(opt & 8)) { /* not -q */
 		printf("Script started, file is %s\n", fname);
 	}
-	shell = get_shell_name();
+	shell = getenv("SHELL");
+	if (shell == NULL) {
+		shell = DEFAULT_SHELL;
+	}
 
 	pty = xgetpty(pty_line);
 
@@ -93,32 +83,33 @@ int script_main(int argc UNUSED_PARAM, char **argv)
 	/* "script" from util-linux exits when child exits,
 	 * we wouldn't wait for EOF from slave pty
 	 * (output may be produced by grandchildren of child) */
-	signal(SIGCHLD, record_signo);
+	signal(SIGCHLD, handle_sigchld);
 
 	/* TODO: SIGWINCH? pass window size changes down to slave? */
 
-	child_pid = xvfork();
+	child_pid = vfork();
+	if (child_pid < 0) {
+		bb_perror_msg_and_die("vfork");
+	}
 
 	if (child_pid) {
 		/* parent */
 #define buf bb_common_bufsiz1
 		struct pollfd pfd[2];
 		int outfd, count, loop;
-		double oldtime = ENABLE_SCRIPTREPLAY ? time(NULL) : 0;
-		smallint fd_count = 2;
 
 		outfd = xopen(fname, mode);
 		pfd[0].fd = pty;
 		pfd[0].events = POLLIN;
-		pfd[1].fd = STDIN_FILENO;
+		pfd[1].fd = 0;
 		pfd[1].events = POLLIN;
 		ndelay_on(pty); /* this descriptor is not shared, can do this */
-		/* ndelay_on(STDIN_FILENO); - NO, stdin can be shared! Pity :( */
+		/* ndelay_on(0); - NO, stdin can be shared! Pity :( */
 
 		/* copy stdin to pty master input,
 		 * copy pty master output to stdout and file */
 		/* TODO: don't use full_write's, use proper write buffering */
-		while (fd_count && !bb_got_signal) {
+		while (fd_count) {
 			/* not safe_poll! we want SIGCHLD to EINTR poll */
 			if (poll(pfd, fd_count, -1) < 0 && errno != EINTR) {
 				/* If child exits too quickly, we may get EIO:
@@ -133,18 +124,9 @@ int script_main(int argc UNUSED_PARAM, char **argv)
 					goto restore;
 				}
 				if (count > 0) {
-					if (ENABLE_SCRIPTREPLAY && (opt & OPT_t)) {
-						struct timeval tv;
-						double newtime;
-
-						gettimeofday(&tv, NULL);
-						newtime = tv.tv_sec + (double) tv.tv_usec / 1000000;
-						fprintf(stderr, "%f %u\n", newtime - oldtime, count);
-						oldtime = newtime;
-					}
 					full_write(STDOUT_FILENO, buf, count);
 					full_write(outfd, buf, count);
-					if (opt & OPT_f) {
+					if (opt & 4) { /* -f */
 						fsync(outfd);
 					}
 				}
@@ -160,8 +142,8 @@ int script_main(int argc UNUSED_PARAM, char **argv)
 				}
 			}
 		}
-		/* If loop was exited because SIGCHLD handler set bb_got_signal,
-		 * there still can be some buffered output. But dont loop forever:
+		/* If loop was exited because SIGCHLD handler set fd_count to 0,
+		 * there still can be some buffered output. But not loop forever:
 		 * we won't pump orphaned grandchildren's output indefinitely.
 		 * Testcase: running this in script:
 		 *      exec dd if=/dev/zero bs=1M count=1
@@ -176,7 +158,7 @@ int script_main(int argc UNUSED_PARAM, char **argv)
  restore:
 		if (attr_ok == 0)
 			tcsetattr(0, TCSAFLUSH, &tt);
-		if (!(opt & OPT_q))
+		if (!(opt & 8)) /* not -q */
 			printf("Script done, file is %s\n", fname);
 		return EXIT_SUCCESS;
 	}
@@ -199,6 +181,6 @@ int script_main(int argc UNUSED_PARAM, char **argv)
 
 	/* Non-ignored signals revert to SIG_DFL on exec anyway */
 	/*signal(SIGCHLD, SIG_DFL);*/
-	execl(shell, shell, shell_opt, shell_arg, (char *) NULL);
+	execl(shell, shell, shell_opt, shell_arg, NULL);
 	bb_simple_perror_msg_and_die(shell);
 }

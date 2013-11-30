@@ -4,9 +4,10 @@
  *
  * Copyright (C) 2003  Manuel Novoa III  <mjn3@codepoet.org>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
+#include <termios.h>
 #include "libbb.h"
 
 struct speed_map {
@@ -29,12 +30,12 @@ static const struct speed_map speeds[] = {
 	{B2400, 2400},
 	{B4800, 4800},
 	{B9600, 9600},
-#ifdef B19200
+#ifdef	B19200
 	{B19200, 19200},
 #elif defined(EXTA)
 	{EXTA, 19200},
 #endif
-#ifdef B38400
+#ifdef	B38400
 	{B38400, 38400/256 + 0x8000U},
 #elif defined(EXTB)
 	{EXTB, 38400/256 + 0x8000U},
@@ -50,9 +51,6 @@ static const struct speed_map speeds[] = {
 #endif
 #ifdef B460800
 	{B460800, 460800/256 + 0x8000U},
-#endif
-#ifdef B921600
-	{B921600, 921600/256 + 0x8000U},
 #endif
 };
 
@@ -96,7 +94,7 @@ int main(void)
 	unsigned long v;
 	speed_t s;
 
-	for (v = 0 ; v < 1000000; v++) {
+	for (v = 0 ; v < 500000; v++) {
 		s = tty_value_to_baud(v);
 		if (s == (speed_t) -1) {
 			continue;

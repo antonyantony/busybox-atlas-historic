@@ -18,27 +18,16 @@
  *	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-//kbuild:### lib-$(CONFIG_FEATURE_VOLUMEID_HIGHPOINTRAID) += highpoint.o
-
-//config:
-//config:### config FEATURE_VOLUMEID_HIGHPOINTRAID
-//config:###	bool "highpoint raid"
-//config:###	default y
-//config:###	depends on VOLUMEID
-//config:###	help
-//config:###	  TODO
-//config:
-
 #include "volume_id_internal.h"
 
 struct hpt37x_meta {
 	uint8_t		filler1[32];
 	uint32_t	magic;
-} PACKED;
+} __attribute__((packed));
 
 struct hpt45x_meta {
 	uint32_t	magic;
-} PACKED;
+} __attribute__((packed));
 
 #define HPT37X_CONFIG_OFF		0x1200
 #define HPT37X_MAGIC_OK			0x5a7816f0
@@ -48,7 +37,7 @@ struct hpt45x_meta {
 #define HPT45X_MAGIC_BAD		0x5a7816fd
 
 
-int FAST_FUNC volume_id_probe_highpoint_37x_raid(struct volume_id *id, uint64_t off)
+int volume_id_probe_highpoint_37x_raid(struct volume_id *id, uint64_t off)
 {
 	struct hpt37x_meta *hpt;
 	uint32_t magic;
@@ -69,7 +58,7 @@ int FAST_FUNC volume_id_probe_highpoint_37x_raid(struct volume_id *id, uint64_t 
 	return 0;
 }
 
-int FAST_FUNC volume_id_probe_highpoint_45x_raid(struct volume_id *id, uint64_t off, uint64_t size)
+int volume_id_probe_highpoint_45x_raid(struct volume_id *id, uint64_t off, uint64_t size)
 {
 	struct hpt45x_meta *hpt;
 	uint64_t meta_off;

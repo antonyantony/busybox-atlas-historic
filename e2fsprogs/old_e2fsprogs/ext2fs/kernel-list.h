@@ -1,6 +1,6 @@
 /* vi: set sw=4 ts=4: */
-#ifndef LINUX_LIST_H
-#define LINUX_LIST_H 1
+#ifndef _LINUX_LIST_H
+#define _LINUX_LIST_H
 
 /*
  * Simple doubly linked list implementation.

@@ -1,9 +1,7 @@
 /* vi: set sw=4 ts=4: */
 /*
- * xreadlink.c - safe implementation of readlink.
- * Returns a NULL on failure...
- *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ *  xreadlink.c - safe implementation of readlink.
+ *  Returns a NULL on failure...
  */
 
 #include "libbb.h"
@@ -91,26 +89,23 @@ char* FAST_FUNC xmalloc_readlink_or_warn(const char *path)
 	char *buf = xmalloc_readlink(path);
 	if (!buf) {
 		/* EINVAL => "file: Invalid argument" => puzzled user */
-		const char *errmsg = "not a symlink";
-		int err = errno;
-		if (err != EINVAL)
-			errmsg = strerror(err);
-		bb_error_msg("%s: cannot read link: %s", path, errmsg);
+		bb_error_msg("%s: cannot read link (not a symlink?)", path);
 	}
 	return buf;
 }
 
+/* UNUSED */
+#if 0
 char* FAST_FUNC xmalloc_realpath(const char *path)
 {
-#if defined(__GLIBC__) || \
-    (defined(__UCLIBC__) && UCLIBC_VERSION >= KERNEL_VERSION(0, 9, 31))
+#if defined(__GLIBC__) && !defined(__UCLIBC__)
 	/* glibc provides a non-standard extension */
-	/* new: POSIX.1-2008 specifies this behavior as well */
 	return realpath(path, NULL);
 #else
 	char buf[PATH_MAX+1];
 
-	/* on error returns NULL (xstrdup(NULL) == NULL) */
+	/* on error returns NULL (xstrdup(NULL) ==NULL) */
 	return xstrdup(realpath(path, buf));
 #endif
 }
+#endif

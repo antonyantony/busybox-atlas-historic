@@ -18,17 +18,6 @@
  *	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-//kbuild:lib-$(CONFIG_FEATURE_VOLUMEID_FAT) += fat.o
-
-//config:
-//config:config FEATURE_VOLUMEID_FAT
-//config:	bool "fat filesystem"
-//config:	default y
-//config:	depends on VOLUMEID
-//config:	help
-//config:	  TODO
-//config:
-
 #include "volume_id_internal.h"
 
 /* linux/msdos_fs.h says: */
@@ -65,7 +54,7 @@ struct vfat_super_block {
 			uint8_t		magic[8];
 			uint8_t		dummy2[192];
 			uint8_t		pmagic[2];
-		} PACKED fat;
+		} __attribute__((__packed__)) fat;
 		struct fat32_super_block {
 			uint32_t	fat32_length;
 			uint16_t	flags;
@@ -80,9 +69,9 @@ struct vfat_super_block {
 			uint8_t		magic[8];
 			uint8_t		dummy2[164];
 			uint8_t		pmagic[2];
-		} PACKED fat32;
-	} PACKED type;
-} PACKED;
+		} __attribute__((__packed__)) fat32;
+	} __attribute__((__packed__)) type;
+} __attribute__((__packed__));
 
 struct vfat_dir_entry {
 	uint8_t		name[11];
@@ -96,7 +85,7 @@ struct vfat_dir_entry {
 	uint16_t	date_write;
 	uint16_t	cluster_low;
 	uint32_t	size;
-} PACKED;
+} __attribute__((__packed__));
 
 static uint8_t *get_attr_volume_id(struct vfat_dir_entry *dir, int count)
 {
@@ -130,9 +119,8 @@ static uint8_t *get_attr_volume_id(struct vfat_dir_entry *dir, int count)
 	return NULL;
 }
 
-int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partition_off*/)
+int volume_id_probe_vfat(struct volume_id *id, uint64_t fat_partition_off)
 {
-#define fat_partition_off ((uint64_t)0)
 	struct vfat_super_block *vs;
 	struct vfat_dir_entry *dir;
 	uint16_t sector_size_bytes;
@@ -184,22 +172,18 @@ int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partitio
 	 */
 
 	/* boot jump address check */
-	if ((vs->boot_jump[0] != 0xeb || vs->boot_jump[2] != 0x90)
-	 && vs->boot_jump[0] != 0xe9
-	) {
+	if ((vs->boot_jump[0] != 0xeb || vs->boot_jump[2] != 0x90) &&
+	     vs->boot_jump[0] != 0xe9)
 		return -1;
-	}
 
 	/* heads check */
 	if (vs->heads == 0)
 		return -1;
 
 	/* cluster size check */
-	if (vs->sectors_per_cluster == 0
-	 || (vs->sectors_per_cluster & (vs->sectors_per_cluster-1))
-	) {
+	if (vs->sectors_per_cluster == 0 ||
+	    (vs->sectors_per_cluster & (vs->sectors_per_cluster-1)))
 		return -1;
-	}
 
 	/* media check */
 	if (vs->media < 0xf8 && vs->media != 0xf0)
@@ -212,11 +196,9 @@ int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partitio
  valid:
 	/* sector size check */
 	sector_size_bytes = le16_to_cpu(vs->sector_size_bytes);
-	if (sector_size_bytes != 0x200 && sector_size_bytes != 0x400
-	 && sector_size_bytes != 0x800 && sector_size_bytes != 0x1000
-	) {
+	if (sector_size_bytes != 0x200 && sector_size_bytes != 0x400 &&
+	    sector_size_bytes != 0x800 && sector_size_bytes != 0x1000)
 		return -1;
-	}
 
 	dbg("sector_size_bytes 0x%x", sector_size_bytes);
 	dbg("sectors_per_cluster 0x%x", vs->sectors_per_cluster);
@@ -263,7 +245,7 @@ int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partitio
 	buf_size = dir_entries * sizeof(struct vfat_dir_entry);
 	buf = volume_id_get_buffer(id, fat_partition_off + root_start_off, buf_size);
 	if (buf == NULL)
-		goto ret;
+		goto found;
 
 	label = get_attr_volume_id((struct vfat_dir_entry*) buf, dir_entries);
 
@@ -279,7 +261,7 @@ int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partitio
 		volume_id_set_label_string(id, vs->type.fat.label, 11);
 	}
 	volume_id_set_uuid(id, vs->type.fat.serno, UUID_DOS);
-	goto ret;
+	goto found;
 
  fat32:
 	/* FAT32 root dir is a cluster chain like any other directory */
@@ -290,20 +272,20 @@ int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partitio
 	next_cluster = root_cluster;
 	maxloop = 100;
 	while (--maxloop) {
-		uint64_t next_off_sct;
+		uint32_t next_off_sct;
 		uint64_t next_off;
 		uint64_t fat_entry_off;
 		int count;
 
 		dbg("next_cluster 0x%x", (unsigned)next_cluster);
-		next_off_sct = (uint64_t)(next_cluster - 2) * vs->sectors_per_cluster;
+		next_off_sct = (next_cluster - 2) * vs->sectors_per_cluster;
 		next_off = (start_data_sct + next_off_sct) * sector_size_bytes;
 		dbg("cluster offset 0x%llx", (unsigned long long) next_off);
 
 		/* get cluster */
 		buf = volume_id_get_buffer(id, fat_partition_off + next_off, buf_size);
 		if (buf == NULL)
-			goto ret;
+			goto found;
 
 		dir = (struct vfat_dir_entry*) buf;
 		count = buf_size / sizeof(struct vfat_dir_entry);
@@ -318,7 +300,7 @@ int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partitio
 		dbg("fat_entry_off 0x%llx", (unsigned long long)fat_entry_off);
 		buf = volume_id_get_buffer(id, fat_partition_off + fat_entry_off, buf_size);
 		if (buf == NULL)
-			goto ret;
+			goto found;
 
 		/* set next cluster */
 		next_cluster = le32_to_cpu(*(uint32_t*)buf) & 0x0fffffff;
@@ -341,9 +323,9 @@ int FAST_FUNC volume_id_probe_vfat(struct volume_id *id /*,uint64_t fat_partitio
 	}
 	volume_id_set_uuid(id, vs->type.fat32.serno, UUID_DOS);
 
- ret:
+ found:
 //	volume_id_set_usage(id, VOLUME_ID_FILESYSTEM);
-	IF_FEATURE_BLKID_TYPE(id->type = "vfat";)
+//	id->type = "vfat";
 
 	return 0;
 }

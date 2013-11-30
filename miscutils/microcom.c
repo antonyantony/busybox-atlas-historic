@@ -5,19 +5,8 @@
  *
  * Copyright (C) 2008 by Vladimir Dronnikov <dronnikov@gmail.com>
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * Licensed under GPLv2, see file LICENSE in this tarball for details.
  */
-
-//usage:#define microcom_trivial_usage
-//usage:       "[-d DELAY] [-t TIMEOUT] [-s SPEED] [-X] TTY"
-//usage:#define microcom_full_usage "\n\n"
-//usage:       "Copy bytes for stdin to TTY and from TTY to stdout\n"
-//usage:     "\n	-d	Wait up to DELAY ms for TTY output before sending every"
-//usage:     "\n		next byte to it"
-//usage:     "\n	-t	Exit if both stdin and TTY are silent for TIMEOUT ms"
-//usage:     "\n	-s	Set serial line to SPEED"
-//usage:     "\n	-X	Disable special meaning of NUL and Ctrl-X from stdin"
-
 #include "libbb.h"
 
 // set raw tty mode
@@ -75,7 +64,7 @@ int microcom_main(int argc UNUSED_PARAM, char **argv)
 	if (sfd < 0) {
 		// device already locked -> bail out
 		if (errno == EEXIST)
-			bb_perror_msg_and_die("can't create '%s'", device_lock_file);
+			bb_perror_msg_and_die("can't create %s", device_lock_file);
 		// can't create lock -> don't care
 		if (ENABLE_FEATURE_CLEAN_UP)
 			free(device_lock_file);
@@ -103,7 +92,7 @@ int microcom_main(int argc UNUSED_PARAM, char **argv)
 	sfd = open_or_warn(argv[0], O_RDWR | O_NOCTTY | O_NONBLOCK);
 	if (sfd < 0)
 		goto done;
-	fcntl(sfd, F_SETFL, O_RDWR);
+	fcntl(sfd, F_SETFL, 0);
 
 	// put device to "raw mode"
 	xget1(sfd, &tio, &tiosfd);
@@ -128,8 +117,7 @@ int microcom_main(int argc UNUSED_PARAM, char **argv)
 
 	bb_got_signal = 0;
 	nfd = 2;
-	// Not safe_poll: we want to exit on signal
-	while (!bb_got_signal && poll(pfd, nfd, timeout) > 0) {
+	while (!bb_got_signal && safe_poll(pfd, nfd, timeout) > 0) {
 		if (nfd > 1 && pfd[1].revents) {
 			char c;
 			// read from stdin -> write to device

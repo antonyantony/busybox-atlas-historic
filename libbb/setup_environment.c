@@ -30,25 +30,20 @@
 
 #include "libbb.h"
 
-void FAST_FUNC setup_environment(const char *shell, int flags, const struct passwd *pw)
+void FAST_FUNC setup_environment(const char *shell, int clear_env, int change_env, const struct passwd *pw)
 {
-	if (!shell || !shell[0])
-		shell = DEFAULT_SHELL;
-
 	/* Change the current working directory to be the home directory
 	 * of the user */
-	if (!(flags & SETUP_ENV_NO_CHDIR)) {
-		if (chdir(pw->pw_dir) != 0) {
-			bb_error_msg("can't change directory to '%s'", pw->pw_dir);
-			xchdir((flags & SETUP_ENV_TO_TMP) ? "/tmp" : "/");
-		}
+	if (chdir(pw->pw_dir)) {
+		xchdir("/");
+		bb_error_msg("can't chdir to home directory '%s'", pw->pw_dir);
 	}
 
-	if (flags & SETUP_ENV_CLEARENV) {
+	if (clear_env) {
 		const char *term;
 
 		/* Leave TERM unchanged. Set HOME, SHELL, USER, LOGNAME, PATH.
-		 * Unset all other environment variables.  */
+		   Unset all other environment variables.  */
 		term = getenv("TERM");
 		clearenv();
 		if (term)
@@ -60,9 +55,10 @@ void FAST_FUNC setup_environment(const char *shell, int flags, const struct pass
 		//xsetenv("LOGNAME", pw->pw_name);
 		//xsetenv("HOME",    pw->pw_dir);
 		//xsetenv("SHELL",   shell);
-	} else if (flags & SETUP_ENV_CHANGEENV) {
+	}
+	else if (change_env) {
 		/* Set HOME, SHELL, and if not becoming a super-user,
-		 * USER and LOGNAME.  */
+		   USER and LOGNAME.  */
 		if (pw->pw_uid) {
  shortcut:
 			xsetenv("USER",    pw->pw_name);

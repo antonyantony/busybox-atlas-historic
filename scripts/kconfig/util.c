@@ -44,20 +44,14 @@ int file_write_dep(const char *name)
 		else
 			fprintf(out, "\t%s\n", file->name);
 	}
-	fprintf(out,
-		"\n"
-		".config include/autoconf.h: $(deps_config)\n"
-		"\n"
-		"include/autoconf.h: .config\n" /* bbox */
-		"\n"
-		"$(deps_config):\n");
+	fprintf(out, "\n.config include/autoconf.h: $(deps_config)\n\n$(deps_config):\n");
 	fclose(out);
 	rename("..config.tmp", name);
 	return 0;
 }
 
 
-/* Allocate initial growable string */
+/* Allocate initial growable sting */
 struct gstr str_new(void)
 {
 	struct gstr gs;
@@ -112,3 +106,4 @@ const char *str_get(struct gstr *gs)
 {
 	return gs->s;
 }
+

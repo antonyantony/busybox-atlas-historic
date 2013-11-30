@@ -5,9 +5,7 @@
  * Written by David MacKenzie <djm@gnu.ai.mit.edu>.
  *
  * Special function for busybox written by Vladimir Oleynik <dzo@simtreas.ru>
- *
- * Licensed under GPLv2, see file LICENSE in this source tree.
- */
+*/
 
 #include "libbb.h"
 
@@ -24,7 +22,7 @@ xrealloc_getcwd_or_warn(char *cwd)
 	char *ret;
 	unsigned path_max;
 
-	path_max = 128; /* 128 + 64 should be enough for 99% of cases */
+	path_max = 128;	/* 128 + 64 should be enough for 99% of cases */
 
 	while (1) {
 		path_max += PATH_INCR;

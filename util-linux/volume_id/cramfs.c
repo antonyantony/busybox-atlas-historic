@@ -18,17 +18,6 @@
  *	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-//kbuild:lib-$(CONFIG_FEATURE_VOLUMEID_CRAMFS) += cramfs.o
-
-//config:
-//config:config FEATURE_VOLUMEID_CRAMFS
-//config:	bool "cramfs filesystem"
-//config:	default y
-//config:	depends on VOLUMEID
-//config:	help
-//config:	  TODO
-//config:
-
 #include "volume_id_internal.h"
 
 struct cramfs_super {
@@ -42,13 +31,12 @@ struct cramfs_super {
 		uint32_t	edition;
 		uint32_t	blocks;
 		uint32_t	files;
-	} PACKED info;
+	} __attribute__((__packed__)) info;
 	uint8_t		name[16];
-} PACKED;
+} __attribute__((__packed__));
 
-int FAST_FUNC volume_id_probe_cramfs(struct volume_id *id /*,uint64_t off*/)
+int volume_id_probe_cramfs(struct volume_id *id, uint64_t off)
 {
-#define off ((uint64_t)0)
 	struct cramfs_super *cs;
 
 	dbg("probing at offset 0x%llx", (unsigned long long) off);
@@ -62,7 +50,7 @@ int FAST_FUNC volume_id_probe_cramfs(struct volume_id *id /*,uint64_t off*/)
 		volume_id_set_label_string(id, cs->name, 16);
 
 //		volume_id_set_usage(id, VOLUME_ID_FILESYSTEM);
-		IF_FEATURE_BLKID_TYPE(id->type = "cramfs";)
+//		id->type = "cramfs";
 		return 0;
 	}
 

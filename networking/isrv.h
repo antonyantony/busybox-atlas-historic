@@ -5,10 +5,12 @@
  *
  * Copyright (C) 2007 Denys Vlasenko
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * Licensed under GPL version 2, see file LICENSE in this tarball for details.
  */
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 /* opaque structure */
 struct isrv_state_t;
@@ -34,4 +36,6 @@ void isrv_run(
 	int linger_timeout
 );
 
-POP_SAVED_FUNCTION_VISIBILITY
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
+#endif
