@@ -206,8 +206,8 @@ errcode_t ext2fs_flush(ext2_filsys fs)
 	blk_t		group_block;
 	errcode_t	retval;
 	unsigned long	fs_state;
-	struct ext2_super_block *super_shadow = 0;
-	struct ext2_group_desc *group_shadow = 0;
+	struct ext2_super_block *super_shadow = NULL;
+	struct ext2_group_desc *group_shadow = NULL;
 	char	*group_ptr;
 	int	old_desc_blocks;
 #if BB_BIG_ENDIAN
@@ -378,4 +378,3 @@ errcode_t ext2fs_close(ext2_filsys fs)
 	ext2fs_free(fs);
 	return 0;
 }
-

@@ -5,6 +5,10 @@
  */
 
 #include "libbb.h"
+<<<<<<< HEAD
+#include "atlas_probe.h"
+=======
+>>>>>>> ripe-atlas-fw-4550
 #include <event2/dns.h>
 #include <event2/event.h>
 #include <event2/event_struct.h>
@@ -2365,7 +2369,11 @@ static void *traceroute_init(int __attribute((unused)) argc, char *argv[],
 	{
 		if (!validate_filename(out_filename, SAFE_PREFIX))
 		{
+<<<<<<< HEAD
+			crondlog(LVL8 "insecure file '%s' allowed %s", out_filename, SAFE_PREFIX);
+=======
 			crondlog(LVL8 "insecure file '%s'", out_filename);
+>>>>>>> ripe-atlas-fw-4550
 			return NULL;
 		}
 		fh= fopen(out_filename, "a");
@@ -2378,6 +2386,18 @@ static void *traceroute_init(int __attribute((unused)) argc, char *argv[],
 		fclose(fh);
 	}
 
+<<<<<<< HEAD
+=======
+	if (str_Atlas)
+	{
+		if (!validate_atlas_id(str_Atlas))
+		{
+			crondlog(LVL8 "bad atlas ID '%s'", str_Atlas);
+			return NULL;
+		}
+	}
+
+>>>>>>> ripe-atlas-fw-4550
 	if (!delay_name_res)
 	{
 		/* Attempt to resolve 'name' */

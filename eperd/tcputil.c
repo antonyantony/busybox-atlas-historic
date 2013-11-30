@@ -29,8 +29,11 @@ void tu_connect_to_name(struct tu_env *env, char *host, char *port,
 	void (*readcb)(struct bufferevent *bev, void *ptr),
 	void (*writecb)(struct bufferevent *bev, void *ptr))
 {
+<<<<<<< HEAD
 	struct evdns_getaddrinfo_request *evdns_req;
 
+=======
+>>>>>>> ripe-atlas-fw-4550
 	env->interval= *interval;
 	env->reporterr= reporterr;
 	env->reportcount= reportcount;
@@ -46,8 +49,12 @@ void tu_connect_to_name(struct tu_env *env, char *host, char *port,
 
 	env->dnsip= 1;
 	env->connecting= 0;
+<<<<<<< HEAD
 	evdns_req= evdns_getaddrinfo(DnsBase, host, port,
 		hints, dns_cb, env);
+=======
+	(void) evdns_getaddrinfo(DnsBase, host, port, hints, dns_cb, env);
+>>>>>>> ripe-atlas-fw-4550
 }
 
 void tu_restart_connect(struct tu_env *env)

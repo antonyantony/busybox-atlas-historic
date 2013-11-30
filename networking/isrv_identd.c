@@ -4,8 +4,18 @@
  *
  * Copyright (C) 2007 Denys Vlasenko
  *
- * Licensed under GPL version 2, see file LICENSE in this tarball for details.
+ * Licensed under GPLv2, see file LICENSE in this source tree.
  */
+
+//usage:#define fakeidentd_trivial_usage
+//usage:       "[-fiw] [-b ADDR] [STRING]"
+//usage:#define fakeidentd_full_usage "\n\n"
+//usage:       "Provide fake ident (auth) service\n"
+//usage:     "\n	-f	Run in foreground"
+//usage:     "\n	-i	Inetd mode"
+//usage:     "\n	-w	Inetd 'wait' mode"
+//usage:     "\n	-b ADDR	Bind to specified address"
+//usage:     "\n	STRING	Ident answer string (default: nobody)"
 
 #include "libbb.h"
 #include <syslog.h>
@@ -122,7 +132,7 @@ int fakeidentd_main(int argc UNUSED_PARAM, char **argv)
 	 * log to stderr. I like daemontools more. Go their way.
 	 * (Or maybe we need yet another option "log to syslog") */
 	if (!(opt & OPT_fiw) /* || (opt & OPT_syslog) */) {
-		openlog(applet_name, 0, LOG_DAEMON);
+		openlog(applet_name, LOG_PID, LOG_DAEMON);
 		logmode = LOGMODE_SYSLOG;
 	}
 

@@ -12,6 +12,10 @@
 #include <event2/dns.h>
 #include <event2/event.h>
 #include <event2/event_struct.h>
+<<<<<<< HEAD
+#include "atlas_probe.h"
+=======
+>>>>>>> ripe-atlas-fw-4550
 
 #include "eperd.h"
 #include "tcputil.h"
@@ -19,7 +23,11 @@
 #define SAFE_PREFIX_IN ATLAS_DATA_OUT
 #define SAFE_PREFIX_OUT ATLAS_DATA_NEW
 
+<<<<<<< HEAD
 #define CONN_TO		   5
+=======
+#define CONN_TO		   5000		/* Timeout in milliseconds */
+>>>>>>> ripe-atlas-fw-4550
 
 #define ENV2STATE(env) \
 	((struct hgstate *)((char *)env - offsetof(struct hgstate, tu_env)))
@@ -39,6 +47,7 @@ static struct option longopts[]=
 	{ "post-file",	required_argument, NULL, 'p' },
 	{ "post-header", required_argument, NULL, 'h' },
 	{ "post-footer", required_argument, NULL, 'f' },
+<<<<<<< HEAD
 	{ "store-headers", required_argument, NULL, 'H' },
 	{ "store-body",	required_argument, NULL, 'B' },
 	{ "user-agent",	required_argument, NULL, 'u' },
@@ -50,6 +59,23 @@ enum readstate { READ_STATUS, READ_HEADER, READ_BODY, READ_SIMPLE,
 	READ_DONE };
 enum writestate { WRITE_HEADER, WRITE_POST_HEADER, WRITE_POST_FILE,
 	WRITE_POST_FOOTER, WRITE_DONE };
+=======
+	{ "read-limit",	required_argument, NULL, 'r' },
+	{ "store-headers", required_argument, NULL, 'H' },
+	{ "store-body",	required_argument, NULL, 'B' },
+	{ "user-agent",	required_argument, NULL, 'u' },
+	{ "timeout",	required_argument, NULL, 'S' },
+	{ "etim",	no_argument, NULL, 't' },
+	{ "eetim",	no_argument, NULL, 'T' },
+	{ NULL, }
+};
+
+enum readstate { READ_FIRST, READ_STATUS, READ_HEADER, READ_BODY, READ_SIMPLE,
+	READ_CHUNKED, READ_CHUNK_BODY, READ_CHUNK_END, READ_CHUNKED_TRAILER,
+	READ_DONE };
+enum writestate { WRITE_FIRST, WRITE_HEADER, WRITE_POST_HEADER,
+	WRITE_POST_FILE, WRITE_POST_FOOTER, WRITE_DONE };
+>>>>>>> ripe-atlas-fw-4550
 
 struct hgbase
 {
@@ -84,6 +110,12 @@ struct hgstate
 	char *post_footer;
 	int max_headers;
 	int max_body;
+<<<<<<< HEAD
+=======
+	int etim;
+	size_t read_limit;
+	unsigned timeout;
+>>>>>>> ripe-atlas-fw-4550
 
 	/* State */
 	char busy;
@@ -111,6 +143,16 @@ struct hgstate
 	time_t gstart;
 	struct timeval start;
 	double resptime;
+<<<<<<< HEAD
+=======
+	double ttr;		/* Time to resolve */
+	double ttc;		/* Time to connect */
+	double ttfb;		/* Time to first byte */
+	int roffset;
+	int report_roffset;
+	int first_connect;
+	int read_truncated;
+>>>>>>> ripe-atlas-fw-4550
 	FILE *post_fh;
 	char *post_buf;
 
@@ -131,6 +173,13 @@ struct hgstate
 	char *result;
 	size_t reslen;
 	size_t resmax;
+<<<<<<< HEAD
+=======
+
+	char *result2;
+	size_t reslen2;
+	size_t resmax2;
+>>>>>>> ripe-atlas-fw-4550
 };
 
 static struct hgbase *hg_base;
@@ -138,6 +187,10 @@ static struct hgbase *hg_base;
 static void report(struct hgstate *state);
 static void add_str(struct hgstate *state, const char *str);
 static void add_str_quoted(struct hgstate *state, char *str);
+<<<<<<< HEAD
+=======
+static void add_str2(struct hgstate *state, const char *str);
+>>>>>>> ripe-atlas-fw-4550
 
 static struct hgbase *httpget_base_new(struct event_base *event_base)
 {
@@ -304,6 +357,10 @@ static void timeout_callback(int __attribute((unused)) unused,
 	}
 	switch(state->readstate)
 	{
+<<<<<<< HEAD
+=======
+	case READ_FIRST:
+>>>>>>> ripe-atlas-fw-4550
 	case READ_STATUS:
 		add_str(state, DBQ(err) ":" DBQ(timeout reading status) ", ");
 		report(state);
@@ -342,11 +399,21 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 {
 	int c, i, do_combine, do_get, do_head, do_post,
 		max_headers, max_body, only_v4, only_v6,
+<<<<<<< HEAD
 		do_all, do_http10;
 	size_t newsiz;
 	char *url, *check;
 	char *post_file, *output_file, *post_footer, *post_header,
 		*A_arg, *store_headers, *store_body;
+=======
+		do_all, do_http10, do_etim, do_eetim;
+	size_t newsiz, read_limit;
+	unsigned timeout;
+	char *url, *check;
+	char *post_file, *output_file, *post_footer, *post_header,
+		*A_arg, *store_headers, *store_body, *read_limit_str,
+		*timeout_str;
+>>>>>>> ripe-atlas-fw-4550
 	const char *user_agent;
 	char *host, *port, *hostport, *path;
 	struct hgstate *state;
@@ -365,9 +432,19 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 	output_file= NULL;
 	store_headers= NULL;
 	store_body= NULL;
+<<<<<<< HEAD
 	A_arg= NULL;
 	only_v4= 0;
 	only_v6= 0;
+=======
+	read_limit_str= NULL;
+	timeout_str= NULL;
+	A_arg= NULL;
+	only_v4= 0;
+	only_v6= 0;
+	do_etim= 0;
+	do_eetim= 0;
+>>>>>>> ripe-atlas-fw-4550
 	user_agent= "httpget for atlas.ripe.net";
 
 	if (!hg_base)
@@ -390,23 +467,50 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 		case '1':
 			do_http10= 0;
 			break;
+<<<<<<< HEAD
 		case 'a':				/* --all */
 			do_all= 1;
+=======
+		case '4':
+			only_v4= 1;
+			only_v6= 0;
+			break;
+		case '6':
+			only_v6= 1;
+			only_v4= 0;
+>>>>>>> ripe-atlas-fw-4550
 			break;
 		case 'A':
 			A_arg= optarg;
 			break;
+<<<<<<< HEAD
 		case 'c':				/* --combine */
 			do_combine= 1;
 			break;
 		case 'O':
 			output_file= optarg;
+=======
+		case 'a':				/* --all */
+			do_all= 1;
+			break;
+		case 'B':				/* --store-body */
+			store_body= optarg;
+			break;
+		case 'c':				/* --combine */
+			do_combine= 1;
+			break;
+		case 'E':				/* --head */
+			do_get = 0;
+			do_head = 1;
+			do_post = 0;
+>>>>>>> ripe-atlas-fw-4550
 			break;
 		case 'g':				/* --get */
 			do_get = 1;
 			do_head = 0;
 			do_post = 0;
 			break;
+<<<<<<< HEAD
 		case 'E':				/* --head */
 			do_get = 0;
 			do_head = 1;
@@ -416,16 +520,34 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 			do_get = 0;
 			do_head = 0;
 			do_post = 1;
+=======
+		case 'f':				/* --post-footer */
+			post_footer= optarg;
+			break;
+		case 'H':				/* --store-headers */
+			store_headers= optarg;
+>>>>>>> ripe-atlas-fw-4550
 			break;
 		case 'h':				/* --post-header */
 			post_header= optarg;
 			break;
+<<<<<<< HEAD
 		case 'f':				/* --post-footer */
 			post_footer= optarg;
+=======
+		case 'O':
+			output_file= optarg;
+			break;
+		case 'P':				/* --post */
+			do_get = 0;
+			do_head = 0;
+			do_post = 1;
+>>>>>>> ripe-atlas-fw-4550
 			break;
 		case 'p':				/* --post-file */
 			post_file= optarg;
 			break;
+<<<<<<< HEAD
 		case 'H':				/* --store-headers */
 			store_headers= optarg;
 			break;
@@ -439,6 +561,19 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 		case '6':
 			only_v6= 1;
 			only_v4= 0;
+=======
+		case 'r':
+			read_limit_str= optarg;		/* --read-limit */
+			break;
+		case 'T':				/* --etim */
+			do_eetim= 1;
+			break;
+		case 't':				/* --etim */
+			do_etim= 1;
+			break;
+		case 'S':
+			timeout_str= optarg;		/* --timeout */
+>>>>>>> ripe-atlas-fw-4550
 			break;
 		case 'u':				/* --user-agent */
 			user_agent= optarg;
@@ -472,6 +607,19 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 		}
 		fclose(fh);
 	}
+<<<<<<< HEAD
+=======
+
+	if (A_arg)
+	{
+		if (!validate_atlas_id(A_arg))
+		{
+			crondlog(LVL8 "bad atlas ID '%s'", A_arg);
+			return NULL;
+		}
+	}
+
+>>>>>>> ripe-atlas-fw-4550
 	if (post_header && !validate_filename(post_header, SAFE_PREFIX_IN))
 	{
 		crondlog(LVL8 "insecure file '%s'", post_header);
@@ -515,6 +663,35 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 		}
 	}
 
+<<<<<<< HEAD
+=======
+	read_limit= 0;
+	if (read_limit_str)
+	{
+		read_limit= strtoul(read_limit_str, &check, 10);
+		if (check[0] != '\0')
+		{
+			crondlog(LVL8
+				"unable to parse argument (--read-limit) '%s'",
+				read_limit_str);
+			return NULL;
+		}
+	}
+
+	timeout= CONN_TO;
+	if (timeout_str)
+	{
+		timeout= strtoul(timeout_str, &check, 10);
+		if (check[0] != '\0')
+		{
+			crondlog(LVL8
+				"unable to parse argument (--timeout) '%s'",
+				timeout_str);
+			return NULL;
+		}
+	}
+
+>>>>>>> ripe-atlas-fw-4550
 	if (!parse_url(url, &host, &port, &hostport, &path))
 	{
 		/* Do we need to report an error? */
@@ -546,11 +723,27 @@ static void *httpget_init(int __attribute((unused)) argc, char *argv[],
 	state->user_agent= user_agent ? strdup(user_agent) : NULL;
 	state->max_headers= max_headers;
 	state->max_body= max_body;
+<<<<<<< HEAD
+=======
+	state->read_limit= read_limit;
+	state->timeout= timeout;
+>>>>>>> ripe-atlas-fw-4550
 
 	state->only_v4= 2;
 
 	state->only_v4= !!only_v4;	/* Gcc bug? */
 	state->only_v6= !!only_v6;
+<<<<<<< HEAD
+=======
+	
+	if (do_eetim)
+		state->etim= 2;
+	else if (do_etim)
+		state->etim= 1;
+	else
+		state->etim= 0;
+
+>>>>>>> ripe-atlas-fw-4550
 
 	//evtimer_assign(&state->timer, state->base->event_base,
 	//	timeout_callback, state);
@@ -649,12 +842,32 @@ static void report(struct hgstate *state)
 			state->sin6.sin6_family == AF_INET6 ? 6 : 4);
 		add_str(state, line);
 
+<<<<<<< HEAD
+=======
+		if (state->read_truncated)
+			add_str(state, ", " DBQ(read-truncated) ": True");
+
+>>>>>>> ripe-atlas-fw-4550
 		getnameinfo((struct sockaddr *)&state->sin6, state->socklen,
 			namebuf, sizeof(namebuf), NULL, 0, NI_NUMERICHOST);
 
 		snprintf(line, sizeof(line), ", " DBQ(dst_addr) ":" DBQ(%s),
 			namebuf);
 		add_str(state, line);
+<<<<<<< HEAD
+=======
+
+		/* End of readtiming */
+		if (state->etim >= 2)
+		{
+			add_str2(state, " ]");
+			add_str(state, state->result2);
+			free(state->result2);
+			state->result2= NULL;
+			state->resmax2= 0;
+			state->reslen2= 0;
+		}
+>>>>>>> ripe-atlas-fw-4550
 	}
 
 	if (!state->connecting && !state->dnserr)
@@ -684,6 +897,20 @@ static void report(struct hgstate *state)
 			state->headers_size,
 			state->content_offset);
 		add_str(state, line);
+<<<<<<< HEAD
+=======
+		if (state->etim >= 1)
+		{
+			snprintf(line, sizeof(line),
+				", " DBQ(ttr) ":%f"
+				", " DBQ(ttc) ":%f"
+				", " DBQ(ttfb) ":%f",
+				state->ttr,
+				state->ttc,
+				state->ttfb);
+			add_str(state, line);
+		}
+>>>>>>> ripe-atlas-fw-4550
 	}
 
 	if (!state->dnserr)
@@ -726,14 +953,26 @@ static void report(struct hgstate *state)
 
 	tu_cleanup(&state->tu_env);
 
+<<<<<<< HEAD
 	if (state->base->done)
 		state->base->done(state);
 	state->busy= 0;
+=======
+	state->busy= 0;
+	if (state->base->done)
+		state->base->done(state);
+>>>>>>> ripe-atlas-fw-4550
 }
 
 static int get_input(struct hgstate *state)
 {
 	int n;
+<<<<<<< HEAD
+=======
+	double t;
+	struct timeval endtime;
+	char line[80];
+>>>>>>> ripe-atlas-fw-4550
 
 	/* Assume that we always end up with a full buffer anyway */
 	if (state->linemax == 0)
@@ -764,12 +1003,33 @@ static int get_input(struct hgstate *state)
 		return -1;	/* We cannot get more data */
 	}
 
+<<<<<<< HEAD
+=======
+	if (state->etim >= 2 && state->report_roffset)
+	{
+		gettimeofday(&endtime, NULL);
+		t= (endtime.tv_sec-state->start.tv_sec)*1e3 +
+			(endtime.tv_usec-state->start.tv_usec)/1e3;
+		if (state->roffset != 0)
+			add_str2(state, ",");
+		snprintf(line, sizeof(line),
+			" { " DBQ(o) ":" DBQ(%d)
+			", " DBQ(t) ": %f }", state->roffset, t);
+		add_str2(state, line);
+		state->report_roffset= 0;
+	}
+
+>>>>>>> ripe-atlas-fw-4550
 	n= bufferevent_read(state->bev,
 		&state->line[state->linelen],
 		state->linemax-state->linelen);
 	if (n < 0)
 		return -1;
 	state->linelen += n;
+<<<<<<< HEAD
+=======
+	state->roffset += n;
+>>>>>>> ripe-atlas-fw-4550
 	return 0;
 }
 
@@ -823,9 +1083,30 @@ static void add_str_quoted(struct hgstate *state, char *str)
 	}
 }
 
+<<<<<<< HEAD
 static void err_status(struct hgstate *state, const char *reason)
 {
 	char line[80];
+=======
+static void add_str2(struct hgstate *state, const char *str)
+{
+	size_t len;
+
+	len= strlen(str);
+	if (state->reslen2 + len+1 > state->resmax2)
+	{
+		state->resmax2= 2*state->reslen2 + len+1 + 80;
+		state->result2= xrealloc(state->result2, state->resmax2);
+	}
+	memcpy(state->result2+state->reslen2, str, len+1);
+	state->reslen2 += len;
+}
+
+static void err_status(struct hgstate *state, const char *reason)
+{
+	char line[80];
+
+>>>>>>> ripe-atlas-fw-4550
 	snprintf(line, sizeof(line),
 		DBQ(err) ":" DBQ(bad status line: %s) ", ", 
 		reason);
@@ -836,6 +1117,10 @@ static void err_status(struct hgstate *state, const char *reason)
 static void err_header(struct hgstate *state, const char *reason)
 {
 	char line[80];
+<<<<<<< HEAD
+=======
+
+>>>>>>> ripe-atlas-fw-4550
 	if (state->max_headers != 0)
 		add_str(state, " ], ");
 	snprintf(line, sizeof(line),
@@ -864,10 +1149,46 @@ static void readcb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 
 	state= ENV2STATE(ptr);
 
+<<<<<<< HEAD
 	for (;;)
 	{
 		switch(state->readstate)
 		{
+=======
+	state->report_roffset= 1;
+	for (;;)
+	{
+		if (state->read_limit > 0 &&
+			state->roffset >= state->read_limit)
+		{
+			state->read_truncated= 1;
+			switch(state->readstate)
+			{
+			case READ_FIRST:
+			case READ_STATUS:
+				err_status(state, "read truncated");
+				return;
+			case READ_HEADER:
+				err_header(state, "read truncated");
+				return;
+			default:
+				state->readstate= READ_DONE;
+				break;
+			}
+		}
+		switch(state->readstate)
+		{
+		case READ_FIRST:
+			gettimeofday(&endtime, NULL);
+			state->ttfb= (endtime.tv_sec-
+				state->start.tv_sec)*1e3 +
+				(endtime.tv_usec-state->start.tv_usec)/1e3;
+			state->readstate= READ_STATUS;
+			state->roffset= 0;
+			if (state->etim >= 2)
+				add_str2(state, ", " DBQ(readtiming) ": [");
+			continue;
+>>>>>>> ripe-atlas-fw-4550
 		case READ_STATUS:
 		case READ_HEADER:
 		case READ_CHUNKED:
@@ -1425,6 +1746,10 @@ static void writecb(struct bufferevent *bev, void *ptr)
 	struct evbuffer *output;
 	off_t cLength;
 	struct stat sb;
+<<<<<<< HEAD
+=======
+	struct timeval endtime;
+>>>>>>> ripe-atlas-fw-4550
 
 	state= ENV2STATE(ptr);
 
@@ -1432,6 +1757,16 @@ static void writecb(struct bufferevent *bev, void *ptr)
 	{
 		switch(state->writestate)
 		{
+<<<<<<< HEAD
+=======
+		case WRITE_FIRST:
+			gettimeofday(&endtime, NULL);
+			state->ttc= (endtime.tv_sec-
+				state->start.tv_sec)*1e3 +
+				(endtime.tv_usec-state->start.tv_usec)/1e3;
+			state->writestate= WRITE_HEADER;
+			continue;
+>>>>>>> ripe-atlas-fw-4550
 		case WRITE_HEADER:
 			output= bufferevent_get_output(bev);
 			evbuffer_add_printf(output, "%s %s HTTP/1.%c\r\n",
@@ -1583,6 +1918,10 @@ static void beforeconnect(struct tu_env *env,
 	struct sockaddr *addr, socklen_t addrlen)
 {
 	struct hgstate *state;
+<<<<<<< HEAD
+=======
+	struct timeval endtime;
+>>>>>>> ripe-atlas-fw-4550
 
 	state= ENV2STATE(env);
 
@@ -1590,13 +1929,23 @@ static void beforeconnect(struct tu_env *env,
 	memcpy(&state->sin6, addr, state->socklen);
 
 	state->connecting= 1;
+<<<<<<< HEAD
 	state->readstate= READ_STATUS;
 	state->writestate= WRITE_HEADER;
+=======
+	state->readstate= READ_FIRST;
+	state->writestate= WRITE_FIRST;
+>>>>>>> ripe-atlas-fw-4550
 
 	state->linelen= 0;
 	state->lineoffset= 0;
 	state->headers_size= 0;
 	state->tot_headers= 0;
+<<<<<<< HEAD
+=======
+	state->roffset= 0;
+	state->read_truncated= 0;
+>>>>>>> ripe-atlas-fw-4550
 
 	/* Clear result */
 	if (!state->do_all || !state->do_combine)
@@ -1604,6 +1953,16 @@ static void beforeconnect(struct tu_env *env,
 
 	add_str(state, "{ ");
 
+<<<<<<< HEAD
+=======
+	if (state->first_connect)
+	{
+		gettimeofday(&endtime, NULL);
+		state->ttr= (endtime.tv_sec-state->start.tv_sec)*1e3 +
+			(endtime.tv_usec-state->start.tv_usec)/1e3;
+		state->first_connect= 0;
+	}
+>>>>>>> ripe-atlas-fw-4550
 	gettimeofday(&state->start, NULL);
 }
 
@@ -1688,6 +2047,11 @@ static void httpget_start(void *state)
 	hgstate->readstate= READ_STATUS;
 	hgstate->writestate= WRITE_HEADER;
 	hgstate->gstart= time(NULL);
+<<<<<<< HEAD
+=======
+	gettimeofday(&hgstate->start, NULL);
+	hgstate->first_connect= 1;
+>>>>>>> ripe-atlas-fw-4550
 
 	memset(&hints, '\0', sizeof(hints));
 	hints.ai_socktype= SOCK_STREAM;
@@ -1695,8 +2059,13 @@ static void httpget_start(void *state)
 		hints.ai_family= AF_INET;
 	else if (hgstate->only_v6)
 		hints.ai_family= AF_INET6;
+<<<<<<< HEAD
 	interval.tv_sec= CONN_TO;
 	interval.tv_usec= 0;
+=======
+	interval.tv_sec= hgstate->timeout / 1000;
+	interval.tv_usec= (hgstate->timeout % 1000) * 1000;
+>>>>>>> ripe-atlas-fw-4550
 	tu_connect_to_name(&hgstate->tu_env, hgstate->host, hgstate->port,
 		&interval, &hints, timeout_callback,
 		reporterr, dnscount, beforeconnect,

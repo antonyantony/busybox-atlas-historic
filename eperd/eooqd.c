@@ -15,8 +15,13 @@
 #include "eperd.h"
 
 #define SUFFIX 		".curr"
+<<<<<<< HEAD
+#define OOQD_NEW_PREFIX	CONFIG_FEATURE_EPERD_NEW_DIR"/eooq"
+#define OOQD_OUT	CONFIG_FEATURE_EPERD_OUT_DIR"/eooq"
+=======
 #define OOQD_NEW_PREFIX	"/home/atlas/data/new/ooq"
 #define OOQD_OUT	"/home/atlas/data/ooq.out/ooq"
+>>>>>>> ripe-atlas-fw-4550
 
 #define ATLAS_NARGS	64	/* Max arguments to a built-in command */
 #define ATLAS_ARGSIZE	512	/* Max size of the command line */
@@ -28,6 +33,10 @@
 struct slot
 {
 	void *cmdstate;
+<<<<<<< HEAD
+=======
+	struct builtin *bp;
+>>>>>>> ripe-atlas-fw-4550
 };
 
 static struct 
@@ -51,6 +60,10 @@ static struct builtin
 	{ "evhttpget", &httpget_ops },
 	{ "evping", &ping_ops },
 	{ "evtdig", &tdig_ops },
+<<<<<<< HEAD
+=======
+	{ "evsslgetcert", &sslgetcert_ops },
+>>>>>>> ripe-atlas-fw-4550
 	{ "evtraceroute", &traceroute_ops },
 	{ NULL, NULL }
 };
@@ -99,7 +112,11 @@ int eooqd_main(int argc, char *argv[])
 	state->atlas_id= atlas_id;
 	state->queue_file= argv[optind];
 
+<<<<<<< HEAD
+	state->max_busy= 50;
+=======
 	state->max_busy= 10;
+>>>>>>> ripe-atlas-fw-4550
 
 	state->slots= xzalloc(sizeof(*state->slots) * state->max_busy);
 
@@ -123,11 +140,14 @@ int eooqd_main(int argc, char *argv[])
 	DnsBase= evdns_base_new(EventBase, 1 /*initialize*/);
 	if (!DnsBase)
 	{
+<<<<<<< HEAD
 		crondlog(DIE9 "evdns_base_new failed"); /* exits */
 	}
 
 	DnsBase = evdns_base_new(EventBase, 1); 
 	if(!DnsBase) {
+=======
+>>>>>>> ripe-atlas-fw-4550
 		event_base_free(EventBase);
 		crondlog(DIE9 "evdns_base_new failed"); /* exits */
 	}
@@ -355,7 +375,11 @@ static void add_line(void)
 	if (state->slots[slot].cmdstate != NULL)
 		crondlog(DIE9 "no empty slot?");
 	argv[argc++]= "-O";
+<<<<<<< HEAD
+	snprintf(filename, sizeof(filename), OOQD_NEW_PREFIX);
+=======
 	snprintf(filename, sizeof(filename), OOQD_NEW_PREFIX ".%d", slot);
+>>>>>>> ripe-atlas-fw-4550
 	argv[argc++]= filename;
 
 	argv[argc]= NULL;
@@ -369,6 +393,10 @@ static void add_line(void)
 	if (cmdstate != NULL)
 	{
 		state->slots[slot].cmdstate= cmdstate;
+<<<<<<< HEAD
+=======
+		state->slots[slot].bp= bp;
+>>>>>>> ripe-atlas-fw-4550
 		state->curr_index= slot;
 		state->curr_busy++;
 
@@ -421,7 +449,11 @@ error:
 
 static void cmddone(void *cmdstate)
 {
+<<<<<<< HEAD
 	int i;
+=======
+	int i, r;
+>>>>>>> ripe-atlas-fw-4550
 	char from_filename[80];
 	char to_filename[80];
 	struct stat sb;
@@ -439,9 +471,22 @@ static void cmddone(void *cmdstate)
 		report("cmddone: state state %p", cmdstate);
 		return;
 	}
+<<<<<<< HEAD
 	state->slots[i].cmdstate= NULL;
 	state->curr_busy--;
 
+#if 0
+=======
+	r= state->slots[i].bp->testops->delete(cmdstate);
+	if (r != 0)
+	{
+		state->slots[i].cmdstate= NULL;
+		state->curr_busy--;
+	}
+	else
+		report("cmddone: strange, cmd %p is busy", cmdstate);
+
+>>>>>>> ripe-atlas-fw-4550
 	snprintf(from_filename, sizeof(from_filename),
 		"/home/atlas/data/new/ooq.%d", i);
 	snprintf(to_filename, sizeof(to_filename),
@@ -462,6 +507,10 @@ static void cmddone(void *cmdstate)
 	{
 		post_results();
 	}
+<<<<<<< HEAD
+#endif
+=======
+>>>>>>> ripe-atlas-fw-4550
 }
 
 static void re_post(evutil_socket_t fd UNUSED_PARAM, short what UNUSED_PARAM,

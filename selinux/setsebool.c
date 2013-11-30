@@ -4,7 +4,14 @@
  * NOTE: -P option requires libsemanage, so this feature is
  * omitted in this version
  * Yuichi Nakamura <ynakam@hitachisoft.jp>
+ *
+ * Licensed under GPLv2, see file LICENSE in this source tree.
  */
+
+//usage:#define setsebool_trivial_usage
+//usage:       "boolean value"
+//usage:#define setsebool_full_usage "\n\n"
+//usage:       "Change boolean setting"
 
 #include "libbb.h"
 

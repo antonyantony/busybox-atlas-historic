@@ -21,6 +21,11 @@
 
 #include "eperd.h"
 
+<<<<<<< HEAD
+=======
+#define SAFE_PREFIX ATLAS_DATA_NEW
+
+>>>>>>> ripe-atlas-fw-4550
 /* glibc frees previous setenv'ed value when we do next setenv()
  * of the same variable. uclibc does not do this! */
 #if (defined(__GLIBC__) && !defined(__UCLIBC__)) /* || OTHER_SAFE_LIBC... */
@@ -37,12 +42,15 @@
 #ifndef TMPDIR
 #define TMPDIR          "/var/spool/cron"
 #endif
+<<<<<<< HEAD
+=======
 #ifndef SENDMAIL
 #define SENDMAIL        "sendmail"
 #endif
 #ifndef SENDMAIL_ARGS
 #define SENDMAIL_ARGS   "-ti", "oem"
 #endif
+>>>>>>> ripe-atlas-fw-4550
 #ifndef CRONUPDATE
 #define CRONUPDATE      "cron.update"
 #endif
@@ -57,11 +65,14 @@ struct CronLine {
 	struct CronLine *cl_Next;
 	char *cl_Shell;         /* shell command                        */
 	pid_t cl_Pid;           /* running pid, 0, or armed (-1)        */
+<<<<<<< HEAD
+=======
 #if ENABLE_FEATURE_CROND_CALL_SENDMAIL
 	int cl_MailPos;         /* 'empty file' size                    */
 	smallint cl_MailFlag;   /* running pid is for mail              */
 	char *cl_MailTo;	/* whom to mail results			*/
 #endif
+>>>>>>> ripe-atlas-fw-4550
 	unsigned interval;
 	time_t nextcycle;
 	time_t start_time;
@@ -115,11 +126,15 @@ static char *atlas_id= NULL;
 static void CheckUpdates(evutil_socket_t fd, short what, void *arg);
 static void CheckUpdatesHour(evutil_socket_t fd, short what, void *arg);
 static void SynchronizeDir(void);
+<<<<<<< HEAD
+#define EndJob(user, line)  ((line)->cl_Pid = 0)
+=======
 #if ENABLE_FEATURE_CROND_CALL_SENDMAIL
 static void EndJob(const char *user, CronLine *line);
 #else
 #define EndJob(user, line)  ((line)->cl_Pid = 0)
 #endif
+>>>>>>> ripe-atlas-fw-4550
 static void DeleteFile(void);
 static int Insert(CronLine *line);
 static void Start(CronLine *line);
@@ -254,6 +269,15 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 	INIT_G();
 
 	/* "-b after -f is ignored", and so on for every pair a-b */
+<<<<<<< HEAD
+	opt_complementary = "f-b:b-f:S-L:L-S" IF_FEATURE_PERD_D(":d-l")
+			":l+:d+"; /* -l and -d have numeric param */
+	opt = getopt32(argv, "l:L:fbSc:A:DP:" IF_FEATURE_EPERD_D("d:") "O:",
+			&LogLevel, &LogFile, &CDir, &atlas_id, &PidFileName
+			IF_FEATURE_EPERD_D(,&LogLevel), &out_filename);
+	/* both -d N and -l N set the same variable: LogLevel */
+
+=======
 	opt_complementary = "f-b:b-f:S-L:L-S" USE_FEATURE_PERD_D(":d-l")
 			":l+:d+"; /* -l and -d have numeric param */
 	opt = getopt32(argv, "l:L:fbSc:A:DP:" USE_FEATURE_PERD_D("d:") "O:",
@@ -261,6 +285,13 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 			USE_FEATURE_PERD_D(,&LogLevel), &out_filename);
 	/* both -d N and -l N set the same variable: LogLevel */
 
+	if (out_filename && !validate_filename(out_filename, SAFE_PREFIX))
+	{
+		crondlog(DIE9 "insecure file '%s'. allowed path '%s'", 
+				out_filename, SAFE_PREFIX);
+	}
+
+>>>>>>> ripe-atlas-fw-4550
 	if (!(opt & OPT_f)) {
 		/* close stdin, stdout, stderr.
 		 * close unused descriptors - don't need them. */
@@ -327,6 +358,10 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 	}
 	else 
 	{
+<<<<<<< HEAD
+		write_pidfile("/var/run/eperd.pid");
+	}
+=======
 		write_pidfile("/var/run/crond.pid");
 	}
 #if 0
@@ -382,6 +417,7 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 		}
 	}
 #endif
+>>>>>>> ripe-atlas-fw-4550
 	r= event_base_loop(EventBase, 0);
 	if (r != 0)
 		crondlog(LVL9 "event_base_loop failed");
@@ -434,9 +470,12 @@ static void SynchronizeFile(const char *fileName)
 	struct stat sbuf;
 	int r, maxLines;
 	char *tokens[6];
+<<<<<<< HEAD
+=======
 #if ENABLE_FEATURE_CROND_CALL_SENDMAIL
 	char *mailTo = NULL;
 #endif
+>>>>>>> ripe-atlas-fw-4550
 	char *check0, *check1, *check2;
 	CronLine *line;
 
@@ -474,10 +513,13 @@ static void SynchronizeFile(const char *fileName)
 
 			/* check if line is setting MAILTO= */
 			if (0 == strncmp(tokens[0], "MAILTO=", 7)) {
+<<<<<<< HEAD
+=======
 #if ENABLE_FEATURE_CROND_CALL_SENDMAIL
 				free(mailTo);
 				mailTo = (tokens[0][7]) ? xstrdup(&tokens[0][7]) : NULL;
 #endif /* otherwise just ignore such lines */
+>>>>>>> ripe-atlas-fw-4550
 				continue;
 			}
 			/* check if a minimum of tokens is specified */
@@ -520,10 +562,13 @@ static void SynchronizeFile(const char *fileName)
 			}
 
 			line->lasttime= 0;
+<<<<<<< HEAD
+=======
 #if ENABLE_FEATURE_CROND_CALL_SENDMAIL
 			/* copy mailto (can be NULL) */
 			line->cl_MailTo = xstrdup(mailTo);
 #endif
+>>>>>>> ripe-atlas-fw-4550
 			/* copy command */
 			line->cl_Shell = xstrdup(tokens[5]);
 			if (DebugOpt) {
@@ -537,9 +582,12 @@ static void SynchronizeFile(const char *fileName)
 			if (!r)
 			{
 				/* Existing line. Delete new one */
+<<<<<<< HEAD
+=======
 #if ENABLE_FEATURE_CROND_CALL_SENDMAIL
 				free(line->cl_MailTo);
 #endif
+>>>>>>> ripe-atlas-fw-4550
 				free(line->cl_Shell);
 				free(line);
 				continue;
@@ -786,6 +834,10 @@ static struct builtin
 {
 	{ "evhttpget", &httpget_ops },
 	{ "evping", &ping_ops },
+<<<<<<< HEAD
+=======
+	{ "evsslgetcert", &sslgetcert_ops },
+>>>>>>> ripe-atlas-fw-4550
 	{ "evtdig", &tdig_ops },
 	{ "evtraceroute", &traceroute_ops },
 	{ "condmv", &condmv_ops },
@@ -947,6 +999,8 @@ error:
 	}
 }
 
+<<<<<<< HEAD
+=======
 #if ENABLE_FEATURE_CROND_CALL_SENDMAIL
 
 // TODO: sendmail should be _run-time_ option, not compile-time!
@@ -1101,6 +1155,7 @@ static void EndJob(const char *user, CronLine *line)
 
 #else /* crond without sendmail */
 
+>>>>>>> ripe-atlas-fw-4550
 static void RunJob(evutil_socket_t __attribute__ ((unused)) fd,
 	short __attribute__ ((unused)) what, void *arg)
 {
@@ -1155,9 +1210,16 @@ static void RunJob(evutil_socket_t __attribute__ ((unused)) fd,
 	tv.tv_usec= 0;
 	crondlog(LVL7 "RunJob: nextcycle %d, interval %d, start_time %d, distr_offset %d, now %d, tv_sec %d",
 		line->nextcycle, line->interval,
+<<<<<<< HEAD
+		line->start_time, line->distr_offset, now, 
+		tv.tv_sec);
+	event_add(&line->event, &tv);
+}
+=======
 		line->start_time, line->distr_offset, now,
 		tv.tv_sec);
 	event_add(&line->event, &tv);
 }
 
 #endif /* ENABLE_FEATURE_CROND_CALL_SENDMAIL */
+>>>>>>> ripe-atlas-fw-4550

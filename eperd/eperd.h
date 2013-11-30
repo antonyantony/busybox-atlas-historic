@@ -44,6 +44,10 @@ struct testops
 extern struct testops condmv_ops;
 extern struct testops httpget_ops;
 extern struct testops ping_ops;
+<<<<<<< HEAD
+=======
+extern struct testops sslgetcert_ops;
+>>>>>>> ripe-atlas-fw-4550
 extern struct testops tdig_ops;
 extern struct testops traceroute_ops;
 

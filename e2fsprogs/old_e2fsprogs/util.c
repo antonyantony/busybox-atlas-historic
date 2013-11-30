@@ -4,10 +4,7 @@
  *
  * Copyright 1995, 1996, 1997, 1998, 1999, 2000 by Theodore Ts'o.
  *
- * %Begin-Header%
- * This file may be redistributed under the terms of the GNU Public
- * License.
- * %End-Header%
+ * Licensed under GPLv2, see file LICENSE in this source tree.
  */
 
 #include <stdio.h>
@@ -38,7 +35,7 @@ void check_plausibility(const char *device, int force)
 	if (force)
 		return;
 	if (val == -1)
-		bb_perror_msg_and_die("cannot stat %s", device);
+		bb_perror_msg_and_die("can't stat '%s'", device);
 	if (!S_ISBLK(s.st_mode)) {
 		printf("%s is not a block special device.\n", device);
 		proceed_question();
@@ -82,7 +79,7 @@ void check_mount(const char *device, int force, const char *type)
 
 	retval = ext2fs_check_if_mounted(device, &mount_flags);
 	if (retval) {
-		bb_error_msg("cannot determine if %s is mounted", device);
+		bb_error_msg("can't determine if %s is mounted", device);
 		return;
 	}
 	if (mount_flags & EXT2_MF_MOUNTED) {
@@ -98,7 +95,6 @@ force_check:
 		bb_error_msg("%s is apparently in use by the system", device);
 		goto force_check;
 	}
-
 }
 
 void parse_journal_opts(char **journal_device, int *journal_flags,
@@ -121,7 +117,7 @@ void parse_journal_opts(char **journal_device, int *journal_flags,
 		}
 		if (strcmp(token, "device") == 0) {
 			*journal_device = blkid_get_devname(NULL, arg, NULL);
-			if (!journal_device) {
+			if (!*journal_device) {
 				journal_usage++;
 				continue;
 			}
@@ -219,7 +215,7 @@ void make_journal_device(char *journal_device, ext2_filsys fs, int quiet, int fo
 					EXT2_FLAG_JOURNAL_DEV_OK, 0,
 					fs->blocksize, io_ptr, &jfs);
 	if (retval)
-		bb_error_msg_and_die("cannot journal device %s", journal_device);
+		bb_error_msg_and_die("can't journal device %s", journal_device);
 	if (!quiet)
 		printf("Adding journal to device %s: ", journal_device);
 	fflush(stdout);
@@ -243,12 +239,12 @@ void make_journal_blocks(ext2_filsys fs, int journal_size, int journal_flags, in
 		return;
 	}
 	if (!quiet)
-		printf("Creating journal (%ld blocks): ", journal_blocks);
+		printf("Creating journal (%lu blocks): ", journal_blocks);
 	fflush(stdout);
 	retval = ext2fs_add_journal_inode(fs, journal_blocks,
 						  journal_flags);
 	if (retval)
-		bb_error_msg_and_die("cannot create journal");
+		bb_error_msg_and_die("can't create journal");
 	if (!quiet)
 		puts("done");
 }

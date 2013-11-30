@@ -19,6 +19,29 @@
  * 98/12/29	- Display version info only when -V specified (G M Sipe)
  */
 
+//usage:#define chattr_trivial_usage
+//usage:       "[-R] [-+=AacDdijsStTu] [-v VERSION] [FILE]..."
+//usage:#define chattr_full_usage "\n\n"
+//usage:       "Change file attributes on an ext2 fs\n"
+//usage:     "\nModifiers:"
+//usage:     "\n	-	Remove attributes"
+//usage:     "\n	+	Add attributes"
+//usage:     "\n	=	Set attributes"
+//usage:     "\nAttributes:"
+//usage:     "\n	A	Don't track atime"
+//usage:     "\n	a	Append mode only"
+//usage:     "\n	c	Enable compress"
+//usage:     "\n	D	Write dir contents synchronously"
+//usage:     "\n	d	Don't backup with dump"
+//usage:     "\n	i	Cannot be modified (immutable)"
+//usage:     "\n	j	Write all data to journal first"
+//usage:     "\n	s	Zero disk storage when deleted"
+//usage:     "\n	S	Write file contents synchronously"
+//usage:     "\n	t	Disable tail-merging of partial blocks with other files"
+//usage:     "\n	u	Allow file to be undeleted"
+//usage:     "\n	-R	Recurse"
+//usage:     "\n	-v	Set the file's version/generation number"
+
 #include "libbb.h"
 #include "e2fs_lib.h"
 
@@ -67,7 +90,7 @@ static int decode_arg(const char *arg, struct globals *gp)
 
 static void change_attributes(const char *name, struct globals *gp);
 
-static int chattr_dir_proc(const char *dir_name, struct dirent *de, void *gp)
+static int FAST_FUNC chattr_dir_proc(const char *dir_name, struct dirent *de, void *gp)
 {
 	char *path = concat_subpath_file(dir_name, de->d_name);
 	/* path is NULL if de->d_name is "." or "..", else... */

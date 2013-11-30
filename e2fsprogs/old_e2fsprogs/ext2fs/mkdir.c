@@ -39,7 +39,7 @@ errcode_t ext2fs_mkdir(ext2_filsys fs, ext2_ino_t parent, ext2_ino_t inum,
 	ext2_ino_t		ino = inum;
 	ext2_ino_t		scratch_ino;
 	blk_t			blk;
-	char			*block = 0;
+	char			*block = NULL;
 
 	EXT2_CHECK_MAGIC(fs, EXT2_ET_MAGIC_EXT2FS_FILSYS);
 
@@ -136,7 +136,4 @@ errcode_t ext2fs_mkdir(ext2_filsys fs, ext2_ino_t parent, ext2_ino_t inum,
 cleanup:
 	ext2fs_free_mem(&block);
 	return retval;
-
 }
-
-

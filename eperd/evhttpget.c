@@ -41,7 +41,11 @@ int evhttpget_main(int argc UNUSED_PARAM, char **argv)
 	state= httpget_ops.init(argc, argv, done);
 	if (!state)
 	{
+<<<<<<< HEAD
 		fprintf(stderr, "evhttpget: traceroute_ops.init failed\n");
+=======
+		fprintf(stderr, "evhttpget: httpget_ops.init failed\n");
+>>>>>>> ripe-atlas-fw-4550
 		exit(1);
 	}
 	httpget_ops.start(state);

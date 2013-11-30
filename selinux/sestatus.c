@@ -4,16 +4,24 @@
  * Ported to busybox: KaiGai Kohei <kaigai@ak.jp.nec.com>
  *
  * Copyright (C) KaiGai Kohei <kaigai@ak.jp.nec.com>
+ *
+ * Licensed under GPLv2, see file LICENSE in this source tree.
  */
+
+//usage:#define sestatus_trivial_usage
+//usage:       "[-vb]"
+//usage:#define sestatus_full_usage "\n\n"
+//usage:       "	-v	Verbose"
+//usage:     "\n	-b	Display current state of booleans"
 
 #include "libbb.h"
 
 extern char *selinux_mnt;
 
-#define OPT_VERBOSE	(1 << 0)
-#define OPT_BOOLEAN	(1 << 1)
+#define OPT_VERBOSE  (1 << 0)
+#define OPT_BOOLEAN  (1 << 1)
 
-#define COL_FMT		"%-31s "
+#define COL_FMT  "%-31s "
 
 static void display_boolean(void)
 {
@@ -33,7 +41,7 @@ static void display_boolean(void)
 		if (pending < 0)
 			goto skip;
 		printf(COL_FMT "%s",
-		       bools[i], active == 0 ? "off" : "on");
+				bools[i], active == 0 ? "off" : "on");
 		if (active != pending)
 			printf(" (%sactivate pending)", pending == 0 ? "in" : "");
 		bb_putchar('\n');
@@ -112,7 +120,8 @@ static void display_verbose(void)
 	/* files contexts */
 	puts("\nFile contexts:");
 
-	cterm = ttyname(0);
+	cterm = xmalloc_ttyname(0);
+//FIXME: if cterm == NULL, we segfault!??
 	puts(cterm);
 	if (cterm && lgetfilecon(cterm, &con) >= 0) {
 		printf(COL_FMT "%s\n", "Controlling term:", con);
@@ -120,7 +129,7 @@ static void display_verbose(void)
 			freecon(con);
 	}
 
-	for (i=0; fc[i] != NULL; i++) {
+	for (i = 0; fc[i] != NULL; i++) {
 		struct stat stbuf;
 
 		if (lgetfilecon(fc[i], &con) < 0)
@@ -148,7 +157,7 @@ int sestatus_main(int argc UNUSED_PARAM, char **argv)
 	const char *pol_path;
 	int rc;
 
-	opt_complementary = "?0";	/* no arguments are required. */
+	opt_complementary = "?0";  /* no arguments are required. */
 	opts = getopt32(argv, "vb");
 
 	/* SELinux status: line */

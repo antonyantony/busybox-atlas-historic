@@ -28,7 +28,11 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /* Busyboxed by Denys Vlasenko <vda.linux@googlemail.com> */
 /* TODO: depends on runit_lib.c - review and reduce/eliminate */
 
-#include <sys/poll.h>
+//usage:#define runsv_trivial_usage
+//usage:       "DIR"
+//usage:#define runsv_full_usage "\n\n"
+//usage:       "Start and monitor a service and optionally an appendant log service"
+
 #include <sys/file.h>
 #include "libbb.h"
 #include "runit_lib.h"
@@ -78,12 +82,13 @@ struct svdir {
 	int pid;
 	smallint state;
 	smallint ctrl;
-	smallint want;
+	smallint sd_want;
 	smallint islog;
 	struct timespec start;
 	int fdlock;
 	int fdcontrol;
 	int fdcontrolwrite;
+	int wstat;
 };
 
 struct globals {
@@ -94,7 +99,7 @@ struct globals {
 	struct fd_pair logpipe;
 	char *dir;
 	struct svdir svd[2];
-};
+} FIX_ALIASING;
 #define G (*(struct globals*)&bb_common_bufsiz1)
 #define haslog       (G.haslog      )
 #define sigterm      (G.sigterm     )
@@ -138,18 +143,10 @@ static void s_term(int sig_no UNUSED_PARAM)
 	write(selfpipe.wr, "", 1); /* XXX */
 }
 
-static char *add_str(char *p, const char *to_add)
-{
-	while ((*p = *to_add) != '\0') {
-		p++;
-		to_add++;
-	}
-	return p;
-}
-
 static int open_trunc_or_warn(const char *name)
 {
-	int fd = open_trunc(name);
+	/* Why O_NDELAY? */
+	int fd = open(name, O_WRONLY | O_NDELAY | O_TRUNC | O_CREAT, 0644);
 	if (fd < 0)
 		bb_perror_msg("%s: warning: cannot open %s",
 				dir, name);
@@ -174,7 +171,7 @@ static void update_status(struct svdir *s)
 		}
 		close(fd);
 		if (rename_or_warn("supervise/pid.new",
-		    s->islog ? "log/supervise/pid" : "log/supervise/pid"+4))
+				s->islog ? "log/supervise/pid" : "log/supervise/pid"+4))
 			return;
 		pidchanged = 0;
 	}
@@ -189,24 +186,26 @@ static void update_status(struct svdir *s)
 		char *p = stat_buf;
 		switch (s->state) {
 		case S_DOWN:
-			p = add_str(p, "down");
+			p = stpcpy(p, "down");
 			break;
 		case S_RUN:
-			p = add_str(p, "run");
+			p = stpcpy(p, "run");
 			break;
 		case S_FINISH:
-			p = add_str(p, "finish");
+			p = stpcpy(p, "finish");
 			break;
 		}
-		if (s->ctrl & C_PAUSE) p = add_str(p, ", paused");
-		if (s->ctrl & C_TERM) p = add_str(p, ", got TERM");
+		if (s->ctrl & C_PAUSE)
+			p = stpcpy(p, ", paused");
+		if (s->ctrl & C_TERM)
+			p = stpcpy(p, ", got TERM");
 		if (s->state != S_DOWN)
-			switch (s->want) {
+			switch (s->sd_want) {
 			case W_DOWN:
-				p = add_str(p, ", want down");
+				p = stpcpy(p, ", want down");
 				break;
 			case W_EXIT:
-				p = add_str(p, ", want exit");
+				p = stpcpy(p, ", want exit");
 				break;
 			}
 		*p++ = '\n';
@@ -224,7 +223,7 @@ static void update_status(struct svdir *s)
 	status.pid_le32 = SWAP_LE32(s->pid);
 	if (s->ctrl & C_PAUSE)
 		status.paused = 1;
-	if (s->want == W_UP)
+	if (s->sd_want == W_UP)
 		status.want = 'u';
 	else
 		status.want = 'd';
@@ -251,9 +250,9 @@ static unsigned custom(struct svdir *s, char c)
 	int w;
 	char a[10];
 	struct stat st;
-	char *prog[2];
 
-	if (s->islog) return 0;
+	if (s->islog)
+		return 0;
 	strcpy(a, "control/?");
 	a[8] = c; /* replace '?' */
 	if (stat(a, &st) == 0) {
@@ -263,21 +262,19 @@ static unsigned custom(struct svdir *s, char c)
 				warn_cannot("vfork for control/?");
 				return 0;
 			}
-			if (!pid) {
+			if (pid == 0) {
 				/* child */
 				if (haslog && dup2(logpipe.wr, 1) == -1)
 					warn_cannot("setup stdout for control/?");
-				prog[0] = a;
-				prog[1] = NULL;
-				execv(a, prog);
+				execl(a, a, (char *) NULL);
 				fatal_cannot("run control/?");
 			}
 			/* parent */
-			while (safe_waitpid(pid, &w, 0) == -1) {
+			if (safe_waitpid(pid, &w, 0) == -1) {
 				warn_cannot("wait for child control/?");
 				return 0;
 			}
-			return !wait_exitcode(w);
+			return WEXITSTATUS(w) == 0;
 		}
 	} else {
 		if (errno != ENOENT)
@@ -293,12 +290,12 @@ static void stopservice(struct svdir *s)
 		s->ctrl |= C_TERM;
 		update_status(s);
 	}
-	if (s->want == W_DOWN) {
+	if (s->sd_want == W_DOWN) {
 		kill(s->pid, SIGCONT);
 		custom(s, 'd');
 		return;
 	}
-	if (s->want == W_EXIT) {
+	if (s->sd_want == W_EXIT) {
 		kill(s->pid, SIGCONT);
 		custom(s, 'x');
 	}
@@ -307,15 +304,33 @@ static void stopservice(struct svdir *s)
 static void startservice(struct svdir *s)
 {
 	int p;
-	char *run[2];
+	const char *arg[4];
+	char exitcode[sizeof(int)*3 + 2];
 
-	if (s->state == S_FINISH)
-		run[0] = (char*)"./finish";
-	else {
-		run[0] = (char*)"./run";
+	if (s->state == S_FINISH) {
+/* Two arguments are given to ./finish. The first one is ./run exit code,
+ * or -1 if ./run didnt exit normally. The second one is
+ * the least significant byte of the exit status as determined by waitpid;
+ * for instance it is 0 if ./run exited normally, and the signal number
+ * if ./run was terminated by a signal. If runsv cannot start ./run
+ * for some reason, the exit code is 111 and the status is 0.
+ */
+		arg[0] = "./finish";
+		arg[1] = "-1";
+		if (WIFEXITED(s->wstat)) {
+			*utoa_to_buf(WEXITSTATUS(s->wstat), exitcode, sizeof(exitcode)) = '\0';
+			arg[1] = exitcode;
+		}
+		//arg[2] = "0";
+		//if (WIFSIGNALED(s->wstat)) {
+			arg[2] = utoa(WTERMSIG(s->wstat));
+		//}
+		arg[3] = NULL;
+	} else {
+		arg[0] = "./run";
+		arg[1] = NULL;
 		custom(s, 'u');
 	}
-	run[1] = NULL;
 
 	if (s->pid != 0)
 		stopservice(s); /* should never happen */
@@ -343,8 +358,8 @@ static void startservice(struct svdir *s)
 			, SIG_DFL);*/
 		sig_unblock(SIGCHLD);
 		sig_unblock(SIGTERM);
-		execvp(*run, run);
-		fatal2_cannot(s->islog ? "start log/" : "start ", *run);
+		execv(arg[0], (char**) arg);
+		fatal2_cannot(s->islog ? "start log/" : "start ", arg[0]);
 	}
 	/* parent */
 	if (s->state != S_FINISH) {
@@ -363,13 +378,13 @@ static int ctrl(struct svdir *s, char c)
 
 	switch (c) {
 	case 'd': /* down */
-		s->want = W_DOWN;
+		s->sd_want = W_DOWN;
 		update_status(s);
 		if (s->pid && s->state != S_FINISH)
 			stopservice(s);
 		break;
 	case 'u': /* up */
-		s->want = W_UP;
+		s->sd_want = W_UP;
 		update_status(s);
 		if (s->pid == 0)
 			startservice(s);
@@ -377,7 +392,7 @@ static int ctrl(struct svdir *s, char c)
 	case 'x': /* exit */
 		if (s->islog)
 			break;
-		s->want = W_EXIT;
+		s->sd_want = W_EXIT;
 		update_status(s);
 		/* FALLTHROUGH */
 	case 't': /* sig term */
@@ -398,12 +413,11 @@ static int ctrl(struct svdir *s, char c)
 	case 'c': /* sig cont */
 		if (s->pid && !custom(s, c))
 			kill(s->pid, SIGCONT);
-		if (s->ctrl & C_PAUSE)
-			s->ctrl &= ~C_PAUSE;
+		s->ctrl &= ~C_PAUSE;
 		update_status(s);
 		break;
 	case 'o': /* once */
-		s->want = W_DOWN;
+		s->sd_want = W_DOWN;
 		update_status(s);
 		if (!s->pid)
 			startservice(s);
@@ -444,9 +458,7 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 
 	INIT_G();
 
-	if (!argv[1] || argv[2])
-		bb_show_usage();
-	dir = argv[1];
+	dir = single_argv(argv);
 
 	xpiped_pair(selfpipe);
 	close_on_exec_on(selfpipe.rd);
@@ -455,19 +467,20 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 	ndelay_on(selfpipe.wr);
 
 	sig_block(SIGCHLD);
-	bb_signals_recursive(1 << SIGCHLD, s_child);
+	bb_signals_recursive_norestart(1 << SIGCHLD, s_child);
 	sig_block(SIGTERM);
-	bb_signals_recursive(1 << SIGTERM, s_term);
+	bb_signals_recursive_norestart(1 << SIGTERM, s_term);
 
 	xchdir(dir);
 	/* bss: svd[0].pid = 0; */
 	if (S_DOWN) svd[0].state = S_DOWN; /* otherwise already 0 (bss) */
 	if (C_NOOP) svd[0].ctrl = C_NOOP;
-	if (W_UP) svd[0].want = W_UP;
+	if (W_UP) svd[0].sd_want = W_UP;
 	/* bss: svd[0].islog = 0; */
 	/* bss: svd[1].pid = 0; */
 	gettimeofday_ns(&svd[0].start);
-	if (stat("down", &s) != -1) svd[0].want = W_DOWN;
+	if (stat("down", &s) != -1)
+		svd[0].sd_want = W_DOWN;
 
 	if (stat("log", &s) == -1) {
 		if (errno != ENOENT)
@@ -480,11 +493,11 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 			haslog = 1;
 			svd[1].state = S_DOWN;
 			svd[1].ctrl = C_NOOP;
-			svd[1].want = W_UP;
+			svd[1].sd_want = W_UP;
 			svd[1].islog = 1;
 			gettimeofday_ns(&svd[1].start);
 			if (stat("log/down", &s) != -1)
-				svd[1].want = W_DOWN;
+				svd[1].sd_want = W_DOWN;
 			xpiped_pair(logpipe);
 			close_on_exec_on(logpipe.rd);
 			close_on_exec_on(logpipe.wr);
@@ -505,7 +518,7 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 	}
 	svd[0].fdlock = xopen3("log/supervise/lock"+4,
 			O_WRONLY|O_NDELAY|O_APPEND|O_CREAT, 0600);
-	if (lock_exnb(svd[0].fdlock) == -1)
+	if (flock(svd[0].fdlock, LOCK_EX | LOCK_NB) == -1)
 		fatal_cannot("lock supervise/lock");
 	close_on_exec_on(svd[0].fdlock);
 	if (haslog) {
@@ -529,7 +542,7 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 		}
 		svd[1].fdlock = xopen3("log/supervise/lock",
 				O_WRONLY|O_NDELAY|O_APPEND|O_CREAT, 0600);
-		if (lock_ex(svd[1].fdlock) == -1)
+		if (flock(svd[1].fdlock, LOCK_EX) == -1)
 			fatal_cannot("lock log/supervise/lock");
 		close_on_exec_on(svd[1].fdlock);
 	}
@@ -562,10 +575,10 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 		char ch;
 
 		if (haslog)
-			if (!svd[1].pid && svd[1].want == W_UP)
+			if (!svd[1].pid && svd[1].sd_want == W_UP)
 				startservice(&svd[1]);
 		if (!svd[0].pid)
-			if (svd[0].want == W_UP || svd[0].state == S_FINISH)
+			if (svd[0].sd_want == W_UP || svd[0].state == S_FINISH)
 				startservice(&svd[0]);
 
 		x[0].fd = selfpipe.rd;
@@ -594,11 +607,12 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 			if ((child == -1) && (errno != EINTR))
 				break;
 			if (child == svd[0].pid) {
+				svd[0].wstat = wstat;
 				svd[0].pid = 0;
 				pidchanged = 1;
-				svd[0].ctrl &=~ C_TERM;
+				svd[0].ctrl &= ~C_TERM;
 				if (svd[0].state != S_FINISH) {
-					fd = open_read("finish");
+					fd = open("finish", O_RDONLY|O_NDELAY);
 					if (fd != -1) {
 						close(fd);
 						svd[0].state = S_FINISH;
@@ -615,6 +629,7 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 			}
 			if (haslog) {
 				if (child == svd[1].pid) {
+					svd[0].wstat = wstat;
 					svd[1].pid = 0;
 					pidchanged = 1;
 					svd[1].state = S_DOWN;
@@ -638,11 +653,11 @@ int runsv_main(int argc UNUSED_PARAM, char **argv)
 			sigterm = 0;
 		}
 
-		if (svd[0].want == W_EXIT && svd[0].state == S_DOWN) {
+		if (svd[0].sd_want == W_EXIT && svd[0].state == S_DOWN) {
 			if (svd[1].pid == 0)
 				_exit(EXIT_SUCCESS);
-			if (svd[1].want != W_EXIT) {
-				svd[1].want = W_EXIT;
+			if (svd[1].sd_want != W_EXIT) {
+				svd[1].sd_want = W_EXIT;
 				/* stopservice(&svd[1]); */
 				update_status(&svd[1]);
 				close(logpipe.wr);
