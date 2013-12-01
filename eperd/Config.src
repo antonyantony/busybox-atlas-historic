@@ -63,6 +63,12 @@ config EVPING
 	help
 		standalone version of event-driven ping
 
+config EVSSLGETCERT
+        bool "evsslgetcert"
+        default n
+        help
+                standalone version of event-driven sslgetcert
+
 config EVTDIG
 	bool "evtdig"
 	default n
@@ -76,7 +82,8 @@ config FEATURE_EVTDIG_DEBUG
 	default n
 	depends on EVTDIG	
 	help
- 	 extra debug info. Also may cause segfault or/and memory leak. Add at your own risk.
+ 	 extra debug info. Also may cause segfault or/and memory leak.
+	 Add at your own risk.
 
 config EVTRACEROUTE
 	bool "evtraceroute"

@@ -20,6 +20,7 @@
 #include <event2/dns.h>
 
 #include "eperd.h"
+#include "atlas_probe.h"
 
 /* glibc frees previous setenv'ed value when we do next setenv()
  * of the same variable. uclibc does not do this! */
@@ -246,10 +247,10 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 			IF_FEATURE_EPERD_D(,&LogLevel), &out_filename);
 	/* both -d N and -l N set the same variable: LogLevel */
 
-	if (out_filename && !validate_filename(out_filename, SAFE_PREFIX))
+	if (out_filename && !validate_filename(out_filename, ATLAS_DATA_OUT))
 	{
 		crondlog(DIE9 "insecure file '%s'. allowed path '%s'", 
-				out_filename, SAFE_PREFIX);
+				out_filename, ATLAS_DATA_OUT);
 	}
 
 	if (!(opt & OPT_f)) {

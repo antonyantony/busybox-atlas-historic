@@ -683,6 +683,25 @@ config ROUTE
 	help
 	  Route displays or manipulates the kernel's IP routing tables.
 
+config RPTRA6
+        bool "rptra6"
+        default n
+        help
+          Report received IPv6 router advertisements
+
+config RPTADDR6
+        bool "rptaddr6"
+        default n
+        help
+          Report IPv6 addresses and routes
+
+config RXTXRPT
+        bool "rxtxrpt"
+        default n
+        help
+          rxtxrpt report RX and TX statistics as well as IPv6 addresses and
+          routes
+
 config SLATTACH
 	bool "slattach"
 	default y

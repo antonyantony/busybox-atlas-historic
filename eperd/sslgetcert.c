@@ -15,6 +15,7 @@ Created:	April 2013 by Philip Homburg for RIPE NCC
 
 #include "eperd.h"
 #include "tcputil.h"
+#include "atlas_probe.h"
 
 #define SAFE_PREFIX_IN ATLAS_DATA_OUT
 #define SAFE_PREFIX_OUT ATLAS_DATA_NEW
