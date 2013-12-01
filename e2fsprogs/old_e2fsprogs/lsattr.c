@@ -12,10 +12,10 @@
 
 /*
  * History:
- * 93/10/30	- Creation
- * 93/11/13	- Replace stat() calls by lstat() to avoid loops
- * 94/02/27	- Integrated in Ted's distribution
- * 98/12/29	- Display version info only when -V specified (G M Sipe)
+ * 93/10/30 - Creation
+ * 93/11/13 - Replace stat() calls by lstat() to avoid loops
+ * 94/02/27 - Integrated in Ted's distribution
+ * 98/12/29 - Display version info only when -V specified (G M Sipe)
  */
 
 #include <sys/types.h>
@@ -93,7 +93,7 @@ static int lsattr_dir_proc(const char *dir_name, struct dirent *de,
 	path = concat_path_file(dir_name, de->d_name);
 
 	if (lstat(path, &st) == -1)
-		bb_perror_msg(path);
+		bb_simple_perror_msg(path);
 	else {
 		if (de->d_name[0] != '.' || (flags & OPT_ALL)) {
 			list_attributes(path);

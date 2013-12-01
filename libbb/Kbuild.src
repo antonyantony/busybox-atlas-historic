@@ -98,10 +98,7 @@ lib-y += time.o
 lib-y += trim.o
 lib-y += u_signal_names.o
 lib-y += uuencode.o
-<<<<<<< HEAD:libbb/Kbuild.src
-=======
 lib-y += validate_atlas_id.o
->>>>>>> ripe-atlas-fw-4550:libbb/Kbuild
 lib-y += validate_filename.o
 lib-y += vdprintf.o
 lib-y += verror_msg.o
@@ -119,8 +116,6 @@ lib-y += xgetcwd.o
 lib-y += xgethostbyname.o
 lib-y += xreadlink.o
 lib-y += xrealloc_vector.o
-lib-y += strlcat.o
-lib-y += strlcpy.o
 
 lib-$(CONFIG_PLATFORM_LINUX) += match_fstype.o
 

@@ -95,7 +95,7 @@ static errcode_t write_journal_file(ext2_filsys fs, char *filename,
 				    blk_t size, int flags)
 {
 	errcode_t	retval;
-	char		*buf = 0;
+	char		*buf = NULL;
 	int		fd, ret_size;
 	blk_t		i;
 
@@ -188,7 +188,6 @@ static int mkjournal_proc(ext2_filsys	fs,
 		return (BLOCK_CHANGED | BLOCK_ABORT);
 	else
 		return BLOCK_CHANGED;
-
 }
 
 /*
@@ -231,7 +230,7 @@ static errcode_t write_journal_inode(ext2_filsys fs, ext2_ino_t journal_ino,
 
 	inode.i_size += fs->blocksize * size;
 	inode.i_blocks += (fs->blocksize / 512) * es.newblocks;
-	inode.i_mtime = inode.i_ctime = time(0);
+	inode.i_mtime = inode.i_ctime = time(NULL);
 	inode.i_links_count = 1;
 	inode.i_mode = LINUX_S_IFREG | 0600;
 
@@ -423,6 +422,5 @@ main(int argc, char **argv)
 	}
 	ext2fs_close(fs);
 	exit(0);
-
 }
 #endif

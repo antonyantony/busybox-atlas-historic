@@ -5,6 +5,7 @@
  */
 
 #include "libbb.h"
+#include "atlas_probe.h"
 #include <event2/dns.h>
 #include <event2/event.h>
 #include <event2/event_struct.h>
@@ -3255,7 +3256,7 @@ for (i= 0; argv[i] != NULL; i++)
 	{
 		if (!validate_filename(out_filename, SAFE_PREFIX))
 		{
-			crondlog(LVL8 "insecure file '%s'", out_filename);
+			crondlog(LVL8 "insecure file '%s' allowed %s", out_filename, SAFE_PREFIX);
 			return NULL;
 		}
 		fh= fopen(out_filename, "a");

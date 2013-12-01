@@ -5,6 +5,7 @@
  */
 
 #include "libbb.h"
+#include "atlas_probe.h"
 
 #define SAFE_PREFIX_FROM ATLAS_DATA_NEW
 #define SAFE_PREFIX_TO ATLAS_DATA_OUT

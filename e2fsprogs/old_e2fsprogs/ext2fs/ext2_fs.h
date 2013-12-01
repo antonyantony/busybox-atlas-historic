@@ -13,9 +13,8 @@
  *
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
-
-#ifndef _LINUX_EXT2_FS_H
-#define _LINUX_EXT2_FS_H
+#ifndef LINUX_EXT2_FS_H
+#define LINUX_EXT2_FS_H 1
 
 #include "ext2_types.h"		/* Changed from linux/types.h */
 
@@ -476,7 +475,7 @@ struct ext2_super_block {
 #define EXT2_FEATURE_COMPAT_IMAGIC_INODES	0x0002
 #define EXT3_FEATURE_COMPAT_HAS_JOURNAL		0x0004
 #define EXT2_FEATURE_COMPAT_EXT_ATTR		0x0008
-#define EXT2_FEATURE_COMPAT_RESIZE_INODE	0x0010
+#define EXT2_FEATURE_COMPAT_RESIZE_INO		0x0010
 #define EXT2_FEATURE_COMPAT_DIR_INDEX		0x0020
 
 #define EXT2_FEATURE_RO_COMPAT_SPARSE_SUPER	0x0001
@@ -567,4 +566,4 @@ struct ext2_dir_entry_2 {
 #define EXT2_DIR_REC_LEN(name_len)	(((name_len) + 8 + EXT2_DIR_ROUND) & \
 					 ~EXT2_DIR_ROUND)
 
-#endif	/* _LINUX_EXT2_FS_H */
+#endif

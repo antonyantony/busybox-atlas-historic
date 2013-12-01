@@ -1,98 +1,76 @@
 /* vi: set sw=4 ts=4: */
 /*
- * static_leases.c -- Couple of functions to assist with storing and
- * retrieving data for static leases
+ * Storing and retrieving data for static leases
  *
  * Wade Berrier <wberrier@myrealbox.com> September 2004
  *
+ * Licensed under GPLv2, see file LICENSE in this source tree.
  */
-
 #include "common.h"
 #include "dhcpd.h"
 
-
 /* Takes the address of the pointer to the static_leases linked list,
- *   Address to a 6 byte mac address
- *   Address to a 4 byte ip address */
-int FAST_FUNC addStaticLease(struct static_lease **lease_struct, uint8_t *mac, uint32_t *ip)
+ * address to a 6 byte mac address,
+ * 4 byte IP address */
+void FAST_FUNC add_static_lease(struct static_lease **st_lease_pp,
+		uint8_t *mac,
+		uint32_t nip)
 {
-	struct static_lease *cur;
-	struct static_lease *new_static_lease;
+	struct static_lease *st_lease;
 
-	/* Build new node */
-	new_static_lease = xmalloc(sizeof(struct static_lease));
-	new_static_lease->mac = mac;
-	new_static_lease->ip = ip;
-	new_static_lease->next = NULL;
-
-	/* If it's the first node to be added... */
-	if (*lease_struct == NULL) {
-		*lease_struct = new_static_lease;
-	} else {
-		cur = *lease_struct;
-		while (cur->next) {
-			cur = cur->next;
-		}
-
-		cur->next = new_static_lease;
+	/* Find the tail of the list */
+	while ((st_lease = *st_lease_pp) != NULL) {
+		st_lease_pp = &st_lease->next;
 	}
 
-	return 1;
+	/* Add new node */
+	*st_lease_pp = st_lease = xzalloc(sizeof(*st_lease));
+	memcpy(st_lease->mac, mac, 6);
+	st_lease->nip = nip;
+	/*st_lease->next = NULL;*/
 }
 
-/* Check to see if a mac has an associated static lease */
-uint32_t FAST_FUNC getIpByMac(struct static_lease *lease_struct, void *arg)
+/* Find static lease IP by mac */
+uint32_t FAST_FUNC get_static_nip_by_mac(struct static_lease *st_lease, void *mac)
 {
-	uint32_t return_ip;
-	struct static_lease *cur = lease_struct;
-	uint8_t *mac = arg;
-
-	return_ip = 0;
-
-	while (cur) {
-		/* If the client has the correct mac  */
-		if (memcmp(cur->mac, mac, 6) == 0) {
-			return_ip = *(cur->ip);
-		}
-
-		cur = cur->next;
+	while (st_lease) {
+		if (memcmp(st_lease->mac, mac, 6) == 0)
+			return st_lease->nip;
+		st_lease = st_lease->next;
 	}
 
-	return return_ip;
+	return 0;
 }
 
-/* Check to see if an ip is reserved as a static ip */
-uint32_t FAST_FUNC reservedIp(struct static_lease *lease_struct, uint32_t ip)
+/* Check to see if an IP is reserved as a static IP */
+int FAST_FUNC is_nip_reserved(struct static_lease *st_lease, uint32_t nip)
 {
-	struct static_lease *cur = lease_struct;
-
-	uint32_t return_val = 0;
-
-	while (cur) {
-		/* If the client has the correct ip  */
-		if (*cur->ip == ip)
-			return_val = 1;
-
-		cur = cur->next;
+	while (st_lease) {
+		if (st_lease->nip == nip)
+			return 1;
+		st_lease = st_lease->next;
 	}
 
-	return return_val;
+	return 0;
 }
 
-#if ENABLE_UDHCP_DEBUG
+#if defined CONFIG_UDHCP_DEBUG && CONFIG_UDHCP_DEBUG >= 2
 /* Print out static leases just to check what's going on */
 /* Takes the address of the pointer to the static_leases linked list */
-void FAST_FUNC printStaticLeases(struct static_lease **arg)
+void FAST_FUNC log_static_leases(struct static_lease **st_lease_pp)
 {
-	/* Get a pointer to the linked list */
-	struct static_lease *cur = *arg;
+	struct static_lease *cur;
 
+	if (dhcp_verbose < 2)
+		return;
+
+	cur = *st_lease_pp;
 	while (cur) {
-		/* printf("PrintStaticLeases: Lease mac Address: %x\n", cur->mac); */
-		printf("PrintStaticLeases: Lease mac Value: %x\n", *(cur->mac));
-		/* printf("PrintStaticLeases: Lease ip Address: %x\n", cur->ip); */
-		printf("PrintStaticLeases: Lease ip Value: %x\n", *(cur->ip));
-
+		bb_info_msg("static lease: mac:%02x:%02x:%02x:%02x:%02x:%02x nip:%x",
+			cur->mac[0], cur->mac[1], cur->mac[2],
+			cur->mac[3], cur->mac[4], cur->mac[5],
+			cur->nip
+		);
 		cur = cur->next;
 	}
 }

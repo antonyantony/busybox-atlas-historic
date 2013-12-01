@@ -8,10 +8,7 @@
  *
  * Copyright 1995, 1996, 1997, 1998, 1999, 2000 by Theodore Ts'o.
  *
- * %Begin-Header%
- * This file may be redistributed under the terms of the GNU Public
- * License.
- * %End-Header%
+ * Licensed under GPLv2, see file LICENSE in this source tree.
  */
 
 /*
@@ -395,7 +392,7 @@ static time_t parse_time(char *str)
 		ts.tm_mday = 0;
 #endif
 	if (ts.tm_mday == 0) {
-		bb_error_msg_and_die("Cannot parse date/time specifier: %s", str);
+		bb_error_msg_and_die("can't parse date/time specifier: %s", str);
 	}
 	return mktime(&ts);
 }
@@ -593,7 +590,7 @@ int tune2fs_main(int argc, char **argv)
 	}
 	retval = ext2fs_check_if_mounted(device_name, &mount_flags);
 	if (retval)
-		bb_error_msg_and_die("cannot determine if %s is mounted", device_name);
+		bb_error_msg_and_die("can't determine if %s is mounted", device_name);
 	/* Normally we only need to write out the superblock */
 	fs->flags |= EXT2_FLAG_SUPER_ONLY;
 
@@ -610,7 +607,7 @@ int tune2fs_main(int argc, char **argv)
 	if (e_flag) {
 		sb->s_errors = errors;
 		ext2fs_mark_super_dirty(fs);
-		printf("Setting error behavior to %d\n", errors);
+		printf("Setting error behavior to %u\n", errors);
 	}
 	if (g_flag) {
 		sb->s_def_resgid = resgid;

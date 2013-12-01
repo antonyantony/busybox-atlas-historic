@@ -83,7 +83,7 @@ static int calc_reserved_gdt_blocks(ext2_filsys fs)
 	if (rsv_gdb > EXT2_ADDR_PER_BLOCK(sb))
 		rsv_gdb = EXT2_ADDR_PER_BLOCK(sb);
 #ifdef RES_GDT_DEBUG
-	printf("max_blocks %lu, rsv_groups = %lu, rsv_gdb = %lu\n",
+	printf("max_blocks %lu, rsv_groups = %lu, rsv_gdb = %u\n",
 	       max_blocks, rsv_groups, rsv_gdb);
 #endif
 
@@ -284,7 +284,7 @@ retry:
 	/*
 	 * check the number of reserved group descriptor table blocks
 	 */
-	if (super->s_feature_compat & EXT2_FEATURE_COMPAT_RESIZE_INODE)
+	if (super->s_feature_compat & EXT2_FEATURE_COMPAT_RESIZE_INO)
 		rsv_gdt = calc_reserved_gdt_blocks(fs);
 	else
 		rsv_gdt = 0;

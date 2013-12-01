@@ -62,13 +62,6 @@ config ARPING
 	help
 	  Ping hosts by ARP packets.
 
-config AUTOSSH
-        bool "autossh"
-        default n
-        help
-          Monitor the ssh port. Added by AA Antony. 2010 Oct
-
-
 config BRCTL
 	bool "brctl"
 	default y
@@ -238,14 +231,9 @@ config FEATURE_HTTPD_CONFIG_WITH_SCRIPT_INTERPR
 	help
 	  This option enables support for running scripts through an
 	  interpreter. Turn this on if you want PHP scripts to work
-<<<<<<< HEAD:networking/Config.src
 	  properly. You need to supply an additional line in your
 	  httpd.conf file:
 	  *.php:/path/to/your/php
-=======
-	  properly. You need to supply an additional line in your httpd
-	  config file: *.php:/path/to/your/php
->>>>>>> ripe-atlas-fw-4550:networking/Config.in
 
 config FEATURE_HTTPD_SET_REMOTE_PORT_TO_ENV
 	bool "Set REMOTE_PORT environment variable for CGI"
@@ -290,7 +278,6 @@ config FEATURE_HTTPD_PROXY
 	  Then a request to /url/myfile will be forwarded to
 	  http://hostname[:port]/new/path/myfile.
 
-<<<<<<< HEAD:networking/Config.src
 config FEATURE_HTTPD_GZIP
 	bool "Support for GZIP content encoding"
 	default y
@@ -298,24 +285,12 @@ config FEATURE_HTTPD_GZIP
 	help
 	  Makes httpd send files using GZIP content encoding if the
 	  client supports it and a pre-compressed <file>.gz exists.
-=======
-config HTTPGET
-	bool "httpget"
-	default y
-	help 
-	  simple http GET. RIPE NCC 2011
->>>>>>> ripe-atlas-fw-4550:networking/Config.in
 
 config HTTPPOST
 	bool "httppost"
 	default y
-<<<<<<< HEAD:networking/Config.src
 	help
           simple httppost --post-file with IPv4. RIPE NCC 2011
-=======
-	help 
-	  simple httppost --post-file with IPv4. RIPE NCC 2011
->>>>>>> ripe-atlas-fw-4550:networking/Config.in
 
 config IFCONFIG
 	bool "ifconfig"
@@ -708,25 +683,6 @@ config ROUTE
 	help
 	  Route displays or manipulates the kernel's IP routing tables.
 
-config RPTRA6
-	bool "rptra6"
-	default n
-	help
-	  Report received IPv6 router advertisements
-
-config RPTADDR6
-	bool "rptaddr6"
-	default n
-	help
-	  Report IPv6 addresses and routes
-
-config RXTXRPT
-	bool "rxtxrpt"
-	default n
-	help
-	  rxtxrpt report RX and TX statistics as well as IPv6 addresses and
-	  routes
-
 config SLATTACH
 	bool "slattach"
 	default y
@@ -738,11 +694,7 @@ config SLATTACH
 config SSLGETCERT
 	bool "sslgetcert"
 	default n
-<<<<<<< HEAD:networking/Config.src
 	help
-=======
-	help 
->>>>>>> ripe-atlas-fw-4550:networking/Config.in
 	  simple simple program to get certificates from an ssl server
 
 #config TC
@@ -937,13 +889,6 @@ config TRACEROUTE6
 	depends on FEATURE_IPV6 && TRACEROUTE
 	help
 	  Utility to trace the route of IPv6 packets.
-
-config FEATURE_TRACEROUTE_IPV6
-	bool "Enable IPv6 Support"
-	default n
-	depends on FEATURE_IPV6 && TRACEROUTE
-	help
-	Add IPv6 support for the traceroute
 
 config FEATURE_TRACEROUTE_VERBOSE
 	bool "Enable verbose output"

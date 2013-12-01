@@ -6,8 +6,14 @@
  *
  * Maintainer: Gennady Feldman <gfeldman@gena01.com> as of Mar 12, 2001
  *
- * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
+ * Licensed under GPLv2 or later, see file LICENSE in this source tree.
  */
+
+//usage:#define logread_trivial_usage
+//usage:       "[-f]"
+//usage:#define logread_full_usage "\n\n"
+//usage:       "Show messages in syslogd's circular buffer\n"
+//usage:     "\n	-f	Output data as log grows"
 
 #include "libbb.h"
 #include <sys/ipc.h>
@@ -34,7 +40,7 @@ struct globals {
 	struct sembuf SMrup[1]; // {0, -1, IPC_NOWAIT | SEM_UNDO},
 	struct sembuf SMrdn[2]; // {1, 0}, {0, +1, SEM_UNDO}
 	struct shbuf_ds *shbuf;
-};
+} FIX_ALIASING;
 #define G (*(struct globals*)&bb_common_bufsiz1)
 #define SMrup (G.SMrup)
 #define SMrdn (G.SMrdn)
@@ -43,13 +49,18 @@ struct globals {
 	memcpy(SMrup, init_sem, sizeof(init_sem)); \
 } while (0)
 
+#if 0
 static void error_exit(const char *str) NORETURN;
 static void error_exit(const char *str)
 {
-	//release all acquired resources
+	/* Release all acquired resources */
 	shmdt(shbuf);
 	bb_perror_msg_and_die(str);
 }
+#else
+/* On Linux, shmdt is not mandatory on exit */
+# define error_exit(str) bb_perror_msg_and_die(str)
+#endif
 
 /*
  * sem_up - up()'s a semaphore.
@@ -60,11 +71,10 @@ static void sem_up(int semid)
 		error_exit("semop[SMrup]");
 }
 
-static void interrupted(int sig UNUSED_PARAM)
+static void interrupted(int sig)
 {
-	signal(SIGINT, SIG_IGN);
-	shmdt(shbuf);
-	exit(EXIT_SUCCESS);
+	/* shmdt(shbuf); - on Linux, shmdt is not mandatory on exit */
+	kill_myself_with_sig(sig);
 }
 
 int logread_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
@@ -79,18 +89,18 @@ int logread_main(int argc UNUSED_PARAM, char **argv)
 
 	log_shmid = shmget(KEY_ID, 0, 0);
 	if (log_shmid == -1)
-		bb_perror_msg_and_die("can't find syslogd buffer");
+		bb_perror_msg_and_die("can't %s syslogd buffer", "find");
 
 	/* Attach shared memory to our char* */
 	shbuf = shmat(log_shmid, NULL, SHM_RDONLY);
 	if (shbuf == NULL)
-		bb_perror_msg_and_die("can't access syslogd buffer");
+		bb_perror_msg_and_die("can't %s syslogd buffer", "access");
 
 	log_semid = semget(KEY_ID, 0, 0);
 	if (log_semid == -1)
 		error_exit("can't get access to semaphores for syslogd buffer");
 
-	signal(SIGINT, interrupted);
+	bb_signals(BB_FATAL_SIGS, interrupted);
 
 	/* Suppose atomic memory read */
 	/* Max possible value for tail is shbuf->size - 1 */
@@ -116,7 +126,7 @@ int logread_main(int argc UNUSED_PARAM, char **argv)
 		shbuf_data = shbuf->data; /* pointer! */
 
 		if (DEBUG)
-			printf("cur:%d tail:%i size:%i\n",
+			printf("cur:%u tail:%u size:%u\n",
 					cur, shbuf_tail, shbuf_size);
 
 		if (!follow) {
@@ -135,7 +145,7 @@ int logread_main(int argc UNUSED_PARAM, char **argv)
 		} else { /* logread -f */
 			if (cur == shbuf_tail) {
 				sem_up(log_semid);
-				fflush(stdout);
+				fflush_all();
 				sleep(1); /* TODO: replace me with a sleep_on */
 				continue;
 			}
@@ -177,9 +187,10 @@ int logread_main(int argc UNUSED_PARAM, char **argv)
 		}
 		free(copy);
 #endif
+		fflush_all();
 	} while (follow);
 
-	shmdt(shbuf);
+	/* shmdt(shbuf); - on Linux, shmdt is not mandatory on exit */
 
 	fflush_stdout_and_exit(EXIT_SUCCESS);
 }

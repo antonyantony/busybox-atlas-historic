@@ -6,17 +6,16 @@
  *
  * Optimize and correcting OCRNL by Vladimir Oleynik <dzo@simtreas.ru>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
+ * Licensed under GPLv2 or later, see file LICENSE in this source tree.
  */
 
-#include <sys/param.h>  /* MAXHOSTNAMELEN */
-#include <sys/utsname.h>
 #include "libbb.h"
+/* After libbb.h, since it needs sys/types.h on some systems */
+#include <sys/utsname.h>
 
 #define LOGIN " login: "
 
 static const char fmtstr_d[] ALIGN1 = "%A, %d %B %Y";
-static const char fmtstr_t[] ALIGN1 = "%H:%M:%S";
 
 void FAST_FUNC print_login_issue(const char *issue_file, const char *tty)
 {
@@ -30,7 +29,7 @@ void FAST_FUNC print_login_issue(const char *issue_file, const char *tty)
 	time(&t);
 	uname(&uts);
 
-	puts("\r");	/* start a new line */
+	puts("\r");  /* start a new line */
 
 	fp = fopen_for_read(issue_file);
 	if (!fp)
@@ -62,15 +61,18 @@ void FAST_FUNC print_login_issue(const char *issue_file, const char *tty)
 			case 'm':
 				outbuf = uts.machine;
 				break;
+/* The field domainname of struct utsname is Linux specific. */
+#if defined(__linux__)
 			case 'D':
 			case 'o':
 				outbuf = uts.domainname;
 				break;
+#endif
 			case 'd':
 				strftime(buf, sizeof(buf), fmtstr_d, localtime(&t));
 				break;
 			case 't':
-				strftime(buf, sizeof(buf), fmtstr_t, localtime(&t));
+				strftime_HHMMSS(buf, sizeof(buf), &t);
 				break;
 			case 'l':
 				outbuf = tty;
@@ -82,7 +84,7 @@ void FAST_FUNC print_login_issue(const char *issue_file, const char *tty)
 		fputs(outbuf, stdout);
 	}
 	fclose(fp);
-	fflush(stdout);
+	fflush_all();
 }
 
 void FAST_FUNC print_login_prompt(void)
@@ -91,7 +93,7 @@ void FAST_FUNC print_login_prompt(void)
 
 	fputs(hostname, stdout);
 	fputs(LOGIN, stdout);
-	fflush(stdout);
+	fflush_all();
 	free(hostname);
 }
 
