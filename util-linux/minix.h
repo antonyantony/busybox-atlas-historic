@@ -48,7 +48,7 @@ struct minix_superblock {
 
 struct minix_dir_entry {
 	uint16_t inode;
-	char name[];
+	char name[0];
 };
 
 /* Believe it or not, but mount.h has this one #defined */

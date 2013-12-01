@@ -7,13 +7,15 @@
  */
 
 /* Constants and structures */
-#include "bb_e2fs_defs.h"
+#include "e2fs_defs.h"
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 /* Iterate a function on each entry of a directory */
 int iterate_on_dir(const char *dir_name,
-		int FAST_FUNC (*func)(const char *, struct dirent *, void *),
+		int (*func)(const char *, struct dirent *, void *),
 		void *private);
 
 /* Get/set a file version on an ext2 file system */
@@ -44,4 +46,6 @@ extern const char e2attr_flags_sname[];
 #define e2attr_flags_sname_chattr (&e2attr_flags_sname[1])
 #endif
 
-POP_SAVED_FUNCTION_VISIBILITY
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
+#endif

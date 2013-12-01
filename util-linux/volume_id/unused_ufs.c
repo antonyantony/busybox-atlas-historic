@@ -18,17 +18,6 @@
  *	Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-//kbuild:### lib-$(CONFIG_FEATURE_VOLUMEID_UFS) += ufs.o
-
-//config:
-//config:### config FEATURE_VOLUMEID_UFS
-//config:###	bool "ufs filesystem"
-//config:###	default y
-//config:###	depends on VOLUMEID
-//config:###	help
-//config:###	  TODO
-//config:
-
 #include "volume_id_internal.h"
 
 struct ufs_super_block {
@@ -84,7 +73,7 @@ struct ufs_super_block {
 		uint32_t	cs_nbfree;
 		uint32_t	cs_nifree;
 		uint32_t	cs_nffree;
-	} PACKED fs_cstotal;
+	} __attribute__((__packed__)) fs_cstotal;
 	int8_t		fs_fmod;
 	int8_t		fs_clean;
 	int8_t		fs_ronly;
@@ -97,7 +86,7 @@ struct ufs_super_block {
 			uint32_t	fs_maxcluster;
 			uint32_t	fs_cpc;
 			uint16_t	fs_opostbl[16][8];
-		} PACKED fs_u1;
+		} __attribute__((__packed__)) fs_u1;
 		struct {
 			int8_t		fs_fsmnt[468];
 			uint8_t		fs_volname[32];
@@ -120,17 +109,17 @@ struct ufs_super_block {
 				uint64_t	cs_nffree;
 				uint64_t	cs_numclusters;
 				uint64_t	cs_spare[3];
-			} PACKED fs_cstotal;
+			} __attribute__((__packed__)) fs_cstotal;
 			struct ufs_timeval {
 				int32_t		tv_sec;
 				int32_t		tv_usec;
-			} PACKED fs_time;
+			} __attribute__((__packed__)) fs_time;
 			int64_t		fs_size;
 			int64_t		fs_dsize;
 			uint64_t	fs_csaddr;
 			int64_t		fs_pendingblocks;
 			int32_t		fs_pendinginodes;
-		} PACKED fs_u2;
+		} __attribute__((__packed__)) fs_u2;
 	}  fs_u11;
 	union {
 		struct {
@@ -140,7 +129,7 @@ struct ufs_super_block {
 			int32_t		fs_state;
 			uint32_t	fs_qbmask[2];
 			uint32_t	fs_qfmask[2];
-		} PACKED fs_sun;
+		} __attribute__((__packed__)) fs_sun;
 		struct {
 			int32_t		fs_sparecon[53];
 			int32_t		fs_reclaim;
@@ -148,7 +137,7 @@ struct ufs_super_block {
 			uint32_t	fs_npsect;
 			uint32_t	fs_qbmask[2];
 			uint32_t	fs_qfmask[2];
-		} PACKED fs_sunx86;
+		} __attribute__((__packed__)) fs_sunx86;
 		struct {
 			int32_t		fs_sparecon[50];
 			int32_t		fs_contigsumsize;
@@ -158,7 +147,7 @@ struct ufs_super_block {
 			uint32_t	fs_qbmask[2];
 			uint32_t	fs_qfmask[2];
 			int32_t		fs_state;
-		} PACKED fs_44;
+		} __attribute__((__packed__)) fs_44;
 	} fs_u2;
 	int32_t		fs_postblformat;
 	int32_t		fs_nrpos;
@@ -166,14 +155,14 @@ struct ufs_super_block {
 	int32_t		fs_rotbloff;
 	uint32_t	fs_magic;
 	uint8_t		fs_space[1];
-} PACKED;
+} __attribute__((__packed__));
 
 #define UFS_MAGIC			0x00011954
 #define UFS2_MAGIC			0x19540119
 #define UFS_MAGIC_FEA			0x00195612
 #define UFS_MAGIC_LFN			0x00095014
 
-int FAST_FUNC volume_id_probe_ufs(struct volume_id *id, uint64_t off)
+int volume_id_probe_ufs(struct volume_id *id, uint64_t off)
 {
 	static const short offsets[] = { 0, 8, 64, 256 };
 

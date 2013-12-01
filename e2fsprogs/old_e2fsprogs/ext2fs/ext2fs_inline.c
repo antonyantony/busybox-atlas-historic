@@ -50,7 +50,9 @@ errcode_t ext2fs_resize_mem(unsigned long EXT2FS_ATTR((unused)) old_size,
 	/* Use "memcpy" for pointer assignments here to avoid problems
 	 * with C99 strict type aliasing rules. */
 	memcpy(&p, ptr, sizeof (p));
-	p = xrealloc(p, size);
+	p = realloc(p, size);
+	if (!p)
+		return EXT2_ET_NO_MEMORY;
 	memcpy(ptr, &p, sizeof (p));
 	return 0;
 }
@@ -155,8 +157,8 @@ int ext2fs_group_of_ino(ext2_filsys fs, ext2_ino_t ino)
 blk_t ext2fs_inode_data_blocks(ext2_filsys fs,
 					struct ext2_inode *inode)
 {
-	return inode->i_blocks -
-		(inode->i_file_acl ? fs->blocksize >> 9 : 0);
+       return inode->i_blocks -
+	      (inode->i_file_acl ? fs->blocksize >> 9 : 0);
 }
 
 

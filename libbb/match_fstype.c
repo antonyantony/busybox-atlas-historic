@@ -5,42 +5,40 @@
  * This allows us to match fstypes that start with no like so
  *   mount -at ,noddy
  *
- * Returns 1 for a match, otherwise 0
+ * Returns 0 for a match, otherwise -1
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
 #include "libbb.h"
 
-#ifdef HAVE_MNTENT_H
-
-int FAST_FUNC match_fstype(const struct mntent *mt, const char *t_fstype)
+int FAST_FUNC match_fstype(const struct mntent *mt, const char *fstype)
 {
-	int match = 1;
+	int no = 0;
 	int len;
 
-	if (!t_fstype)
-		return match;
+	if (!mt)
+		return -1;
 
-	if (t_fstype[0] == 'n' && t_fstype[1] == 'o') {
-		match--;
-		t_fstype += 2;
+	if (!fstype)
+		return 0;
+
+	if (fstype[0] == 'n' && fstype[1] == 'o') {
+		no = -1;
+		fstype += 2;
 	}
 
 	len = strlen(mt->mnt_type);
-	while (1) {
-		if (strncmp(mt->mnt_type, t_fstype, len) == 0
-		 && (t_fstype[len] == '\0' || t_fstype[len] == ',')
+	while (fstype) {
+		if (!strncmp(mt->mnt_type, fstype, len)
+		 && (!fstype[len] || fstype[len] == ',')
 		) {
-			return match;
+			return no;
 		}
-		t_fstype = strchr(t_fstype, ',');
-		if (!t_fstype)
-			break;
-		t_fstype++;
+		fstype = strchr(fstype, ',');
+		if (fstype)
+			fstype++;
 	}
 
-	return !match;
+	return -(no + 1);
 }
-
-#endif /* HAVE_MNTENT_H */

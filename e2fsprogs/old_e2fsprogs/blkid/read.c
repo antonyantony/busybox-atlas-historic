@@ -374,7 +374,9 @@ void blkid_read_cache(blkid_cache cache)
 	DBG(DEBUG_CACHE, printf("reading cache file %s\n",
 				cache->bic_filename));
 
-	file = xfdopen_for_read(fd);
+	file = fdopen(fd, "r");
+	if (!file)
+		goto errout;
 
 	while (fgets(buf, sizeof(buf), file)) {
 		blkid_dev dev;
@@ -385,7 +387,7 @@ void blkid_read_cache(blkid_cache cache)
 			continue;
 		end = strlen(buf) - 1;
 		/* Continue reading next line if it ends with a backslash */
-		while (end < sizeof(buf) - 2 && buf[end] == '\\' &&
+		while (buf[end] == '\\' && end < sizeof(buf) - 2 &&
 		       fgets(buf + end, sizeof(buf) - end, file)) {
 			end = strlen(buf) - 1;
 			lineno++;

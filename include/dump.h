@@ -1,6 +1,8 @@
 /* vi: set sw=4 ts=4: */
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 #define	F_IGNORE	0x01		/* %_A */
 #define	F_SETREP	0x02		/* rep count set, not default */
@@ -45,7 +47,7 @@ typedef struct FS {			/* format strings */
 typedef struct dumper_t {
 	off_t dump_skip;                /* bytes to skip */
 	int dump_length;                /* max bytes to read */
-	smallint dump_vflag;            /*enum dump_vflag_t*/
+	smallint dump_vflag; /*enum dump_vflag_t*/
 	FS *fshead;
 } dumper_t;
 
@@ -53,4 +55,6 @@ dumper_t* alloc_dumper(void) FAST_FUNC;
 extern void bb_dump_add(dumper_t *dumper, const char *fmt) FAST_FUNC;
 extern int bb_dump_dump(dumper_t *dumper, char **argv) FAST_FUNC;
 
-POP_SAVED_FUNCTION_VISIBILITY
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
+#endif

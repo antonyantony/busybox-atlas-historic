@@ -5,21 +5,15 @@
  *
  * Copyright (C) 2007 Denys Vlasenko <vda.linux@googlemail.com>
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * Licensed under GPLv2, see file License in this tarball for details.
  */
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <unistd.h>
-
-#undef ARRAY_SIZE
-#define ARRAY_SIZE(x) ((unsigned)(sizeof(x) / sizeof((x)[0])))
 
 #include "../include/autoconf.h"
-#include "../include/applet_metadata.h"
+#include "../include/busybox.h"
 
 struct bb_applet {
 	const char *name;
@@ -53,7 +47,7 @@ int main(int argc, char **argv)
 {
 	int i;
 	int ofs;
-//	unsigned MAX_APPLET_NAME_LEN = 1;
+	unsigned MAX_APPLET_NAME_LEN = 1;
 
 	qsort(applets, NUM_APPLETS, sizeof(applets[0]), cmp_name);
 
@@ -76,33 +70,29 @@ int main(int argc, char **argv)
 
 	/* Keep in sync with include/busybox.h! */
 
-	printf("/* This is a generated file, don't edit */\n\n");
+	puts("/* This is a generated file, don't edit */\n");
 
 	printf("#define NUM_APPLETS %u\n", NUM_APPLETS);
 	if (NUM_APPLETS == 1) {
 		printf("#define SINGLE_APPLET_STR \"%s\"\n", applets[0].name);
-		printf("#define SINGLE_APPLET_MAIN %s_main\n", applets[0].main);
+		printf("#define SINGLE_APPLET_MAIN %s_main\n", applets[0].name);
 	}
-	printf("\n");
 
-	//printf("#ifndef SKIP_definitions\n");
-	printf("const char applet_names[] ALIGN1 = \"\"\n");
+	puts("\nconst char applet_names[] ALIGN1 = \"\"");
 	for (i = 0; i < NUM_APPLETS; i++) {
 		printf("\"%s\" \"\\0\"\n", applets[i].name);
-//		if (MAX_APPLET_NAME_LEN < strlen(applets[i].name))
-//			MAX_APPLET_NAME_LEN = strlen(applets[i].name);
+		if (MAX_APPLET_NAME_LEN < strlen(applets[i].name))
+			MAX_APPLET_NAME_LEN = strlen(applets[i].name);
 	}
-	printf(";\n\n");
+	puts(";");
 
-	printf("#ifndef SKIP_applet_main\n");
-	printf("int (*const applet_main[])(int argc, char **argv) = {\n");
+	puts("\nint (*const applet_main[])(int argc, char **argv) = {");
 	for (i = 0; i < NUM_APPLETS; i++) {
 		printf("%s_main,\n", applets[i].main);
 	}
-	printf("};\n");
-	printf("#endif\n\n");
+	puts("};");
 
-	printf("const uint16_t applet_nameofs[] ALIGN2 = {\n");
+	puts("const uint16_t applet_nameofs[] ALIGN2 = {");
 	for (i = 0; i < NUM_APPLETS; i++) {
 		printf("0x%04x,\n",
 			offset[i]
@@ -115,10 +105,10 @@ int main(int argc, char **argv)
 #endif
 		);
 	}
-	printf("};\n\n");
+	puts("};");
 
 #if ENABLE_FEATURE_INSTALLER
-	printf("const uint8_t applet_install_loc[] ALIGN1 = {\n");
+	puts("const uint8_t applet_install_loc[] ALIGN1 = {");
 	i = 0;
 	while (i < NUM_APPLETS) {
 		int v = applets[i].install_loc; /* 3 bits */
@@ -127,31 +117,10 @@ int main(int argc, char **argv)
 		printf("0x%02x,\n", v);
 		i++;
 	}
-	printf("};\n");
+	puts("};\n");
 #endif
-	//printf("#endif /* SKIP_definitions */\n");
-//	printf("\n");
-//	printf("#define MAX_APPLET_NAME_LEN %u\n", MAX_APPLET_NAME_LEN);
 
-	if (argv[2]) {
-		char line_old[80];
-		char line_new[80];
-		FILE *fp;
-
-		line_old[0] = 0;
-		fp = fopen(argv[2], "r");
-		if (fp) {
-			fgets(line_old, sizeof(line_old), fp);
-			fclose(fp);
-		}
-		sprintf(line_new, "#define NUM_APPLETS %u\n", NUM_APPLETS);
-		if (strcmp(line_old, line_new) != 0) {
-			fp = fopen(argv[2], "w");
-			if (!fp)
-				return 1;
-			fputs(line_new, fp);
-		}
-	}
+	printf("#define MAX_APPLET_NAME_LEN %u\n", MAX_APPLET_NAME_LEN);
 
 	return 0;
 }

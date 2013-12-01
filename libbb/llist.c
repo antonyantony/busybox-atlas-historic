@@ -7,7 +7,7 @@
  * Copyright (C) 2005 Bernhard Reutner-Fischer
  * Copyright (C) 2006 Rob Landley <rob@landley.net>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under the GPL v2 or later, see the file LICENSE in this tarball.
  */
 
 #include "libbb.h"
@@ -25,44 +25,62 @@ void FAST_FUNC llist_add_to(llist_t **old_head, void *data)
 /* Add data to the end of the linked list.  */
 void FAST_FUNC llist_add_to_end(llist_t **list_head, void *data)
 {
-	while (*list_head)
-		list_head = &(*list_head)->link;
-	*list_head = xzalloc(sizeof(llist_t));
-	(*list_head)->data = data;
-	/*(*list_head)->link = NULL;*/
+	llist_t *new_item = xmalloc(sizeof(llist_t));
+
+	new_item->data = data;
+	new_item->link = NULL;
+
+	if (!*list_head)
+		*list_head = new_item;
+	else {
+		llist_t *tail = *list_head;
+
+		while (tail->link)
+			tail = tail->link;
+		tail->link = new_item;
+	}
 }
 
 /* Remove first element from the list and return it */
 void* FAST_FUNC llist_pop(llist_t **head)
 {
-	void *data = NULL;
-	llist_t *temp = *head;
+	void *data, *next;
 
-	if (temp) {
-		data = temp->data;
-		*head = temp->link;
-		free(temp);
-	}
+	if (!*head)
+		return NULL;
+
+	data = (*head)->data;
+	next = (*head)->link;
+	free(*head);
+	*head = next;
+
 	return data;
 }
 
 /* Unlink arbitrary given element from the list */
 void FAST_FUNC llist_unlink(llist_t **head, llist_t *elm)
 {
-	if (!elm)
+	llist_t *crt;
+
+	if (!(elm && *head))
 		return;
-	while (*head) {
-		if (*head == elm) {
-			*head = (*head)->link;
-			break;
+
+	if (elm == *head) {
+		*head = (*head)->link;
+		return;
+	}
+
+	for (crt = *head; crt; crt = crt->link) {
+		if (crt->link == elm) {
+			crt->link = elm->link;
+			return;
 		}
-		head = &(*head)->link;
 	}
 }
 
 /* Recursively free all elements in the linked list.  If freeit != NULL
  * call it on each datum in the list */
-void FAST_FUNC llist_free(llist_t *elm, void (*freeit)(void *data))
+void FAST_FUNC llist_free(llist_t *elm, void (*freeit) (void *data))
 {
 	while (elm) {
 		void *data = llist_pop(&elm);
@@ -85,14 +103,4 @@ llist_t* FAST_FUNC llist_rev(llist_t *list)
 		list = next;
 	}
 	return rev;
-}
-
-llist_t* FAST_FUNC llist_find_str(llist_t *list, const char *str)
-{
-	while (list) {
-		if (strcmp(list->data, str) == 0)
-			break;
-		list = list->link;
-	}
-	return list;
 }

@@ -5,7 +5,7 @@
  * Copyright (C) many different people.
  * If you wrote this, please acknowledge your work.
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
 #include "libbb.h"
@@ -17,8 +17,8 @@ typedef struct ino_dev_hash_bucket_struct {
 	char name[1];
 } ino_dev_hashtable_bucket_t;
 
-#define HASH_SIZE      311   /* Should be prime */
-#define hash_inode(i)  ((i) % HASH_SIZE)
+#define HASH_SIZE	311		/* Should be prime */
+#define hash_inode(i)	((i) % HASH_SIZE)
 
 /* array of [HASH_SIZE] elements */
 static ino_dev_hashtable_bucket_t **ino_dev_hashtable;
@@ -67,7 +67,7 @@ void FAST_FUNC add_to_ino_dev_hashtable(const struct stat *statbuf, const char *
 	ino_dev_hashtable[i] = bucket;
 }
 
-#if ENABLE_DU || ENABLE_FEATURE_CLEAN_UP
+#if ENABLE_FEATURE_CLEAN_UP
 /* Clear statbuf hash table */
 void FAST_FUNC reset_ino_dev_hashtable(void)
 {

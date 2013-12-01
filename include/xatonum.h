@@ -4,10 +4,12 @@
  *
  * Copyright (C) 2003  Manuel Novoa III  <mjn3@codepoet.org>
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * Licensed under GPLv2, see file LICENSE in this tarball for details.
  */
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 /* Provides extern declarations of functions */
 #define DECLARE_STR_CONV(type, T, UT) \
@@ -22,7 +24,6 @@ unsigned type xato##UT##_sfx(const char *str, const struct suffix_mult *sfx) FAS
 unsigned type xato##UT(const char *str) FAST_FUNC; \
 type xstrto##T##_range_sfx(const char *str, int b, type l, type u, const struct suffix_mult *sfx) FAST_FUNC; \
 type xstrto##T##_range(const char *str, int b, type l, type u) FAST_FUNC; \
-type xstrto##T(const char *str, int b) FAST_FUNC; \
 type xato##T##_range_sfx(const char *str, type l, type u, const struct suffix_mult *sfx) FAST_FUNC; \
 type xato##T##_range(const char *str, type l, type u) FAST_FUNC; \
 type xato##T##_sfx(const char *str, const struct suffix_mult *sfx) FAST_FUNC; \
@@ -67,9 +68,6 @@ static ALWAYS_INLINE \
 narrow xstrto##N##_range(const char *str, int b, narrow l, narrow u) \
 { return xstrto##W##_range(str, b, l, u); } \
 static ALWAYS_INLINE \
-narrow xstrto##N(const char *str, int b) \
-{ return xstrto##W(str, b); } \
-static ALWAYS_INLINE \
 narrow xato##N##_range_sfx(const char *str, narrow l, narrow u, const struct suffix_mult *sfx) \
 { return xato##W##_range_sfx(str, l, u, sfx); } \
 static ALWAYS_INLINE \
@@ -101,7 +99,7 @@ DECLARE_STR_CONV(int, i, u)
 
 /* Specialized */
 
-uint32_t BUG_xatou32_unimplemented(void);
+int BUG_xatou32_unimplemented(void);
 static ALWAYS_INLINE uint32_t xatou32(const char *numstr)
 {
 	if (UINT_MAX == 0xffffffff)
@@ -158,7 +156,7 @@ unsigned bb_strtou(const char *arg, char **endp, int base) FAST_FUNC;
 int bb_strtoi(const char *arg, char **endp, int base) FAST_FUNC;
 #endif
 
-uint32_t BUG_bb_strtou32_unimplemented(void);
+int BUG_bb_strtou32_unimplemented(void);
 static ALWAYS_INLINE
 uint32_t bb_strtou32(const char *arg, char **endp, int base)
 {
@@ -168,18 +166,11 @@ uint32_t bb_strtou32(const char *arg, char **endp, int base)
 		return bb_strtoul(arg, endp, base);
 	return BUG_bb_strtou32_unimplemented();
 }
-static ALWAYS_INLINE
-int32_t bb_strtoi32(const char *arg, char **endp, int base)
-{
-	if (sizeof(int32_t) == sizeof(int))
-		return bb_strtoi(arg, endp, base);
-	if (sizeof(int32_t) == sizeof(long))
-		return bb_strtol(arg, endp, base);
-	return BUG_bb_strtou32_unimplemented();
-}
 
 /* Floating point */
 
 double bb_strtod(const char *arg, char **endp) FAST_FUNC;
 
-POP_SAVED_FUNCTION_VISIBILITY
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
+#endif

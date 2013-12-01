@@ -5,21 +5,22 @@
  *
  * Copyright (C) 2008 by Vladimir Dronnikov <dronnikov@gmail.com>
  *
- * Licensed under GPLv2, see file LICENSE in this source tree.
+ * Licensed under GPLv2, see file LICENSE in this tarball for details.
  */
-
-//usage:#define chat_trivial_usage
-//usage:       "EXPECT [SEND [EXPECT [SEND...]]]"
-//usage:#define chat_full_usage "\n\n"
-//usage:       "Useful for interacting with a modem connected to stdin/stdout.\n"
-//usage:       "A script consists of one or more \"expect-send\" pairs of strings,\n"
-//usage:       "each pair is a pair of arguments. Example:\n"
-//usage:       "chat '' ATZ OK ATD123456 CONNECT '' ogin: pppuser word: ppppass '~'"
-
 #include "libbb.h"
 
+/*
+#define ENABLE_FEATURE_CHAT_NOFAIL              1 // +126 bytes
+#define ENABLE_FEATURE_CHAT_TTY_HIFI            0 // + 70 bytes
+#define ENABLE_FEATURE_CHAT_IMPLICIT_CR         1 // + 44 bytes
+#define ENABLE_FEATURE_CHAT_SEND_ESCAPES        0 // +103 bytes
+#define ENABLE_FEATURE_CHAT_VAR_ABORT_LEN       0 // + 70 bytes
+#define ENABLE_FEATURE_CHAT_CLR_ABORT           0 // +113 bytes
+#define ENABLE_FEATURE_CHAT_SWALLOW_OPTS        0 // + 23 bytes
+*/
+
 // default timeout: 45 sec
-#define DEFAULT_CHAT_TIMEOUT 45*1000
+#define	DEFAULT_CHAT_TIMEOUT 45*1000
 // max length of "abort string",
 // i.e. device reply which causes termination
 #define MAX_ABORT_LEN 50
@@ -36,7 +37,8 @@ enum {
 };
 
 // exit code
-#define exitcode bb_got_signal
+// N.B> 10 bytes for volatile. Why all these signals?!
+static /*volatile*/ smallint exitcode;
 
 // trap for critical signals
 static void signal_handler(UNUSED_PARAM int signo)
@@ -99,10 +101,13 @@ static size_t unescape(char *s, int *nocr)
 	return p - start;
 }
 
+
 int chat_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int chat_main(int argc UNUSED_PARAM, char **argv)
 {
-	int record_fd = -1;
+// should we dump device output? to what fd? by default no.
+// this can be controlled later via ECHO {ON|OFF} chat directive
+//	int echo_fd;
 	bool echo = 0;
 	// collection of device replies which cause unconditional termination
 	llist_t *aborts = NULL;
@@ -127,7 +132,6 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 		DIR_TIMEOUT,
 		DIR_ECHO,
 		DIR_SAY,
-		DIR_RECORD,
 	};
 
 	// make x* functions fail with correct exitcode
@@ -162,14 +166,14 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 #if ENABLE_FEATURE_CHAT_CLR_ABORT
 			"CLR_ABORT\0"
 #endif
-			"TIMEOUT\0" "ECHO\0" "SAY\0" "RECORD\0"
+			"TIMEOUT\0" "ECHO\0" "SAY\0"
 			, *argv
 		);
 		if (key >= 0) {
 			// cache directive value
 			char *arg = *++argv;
-			// OFF -> 0, anything else -> 1
-			bool onoff = (0 != strcmp("OFF", arg));
+			// ON -> 1, anything else -> 0
+			bool onoff = !strcmp("ON", arg);
 			// process directive
 			if (DIR_HANGUP == key) {
 				// turn SIGHUP on/off
@@ -184,24 +188,23 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 				llist_add_to_end(&aborts, arg);
 #if ENABLE_FEATURE_CHAT_CLR_ABORT
 			} else if (DIR_CLR_ABORT == key) {
-				llist_t *l;
 				// remove the string from abort conditions
 				// N.B. gotta refresh maximum length too...
-# if ENABLE_FEATURE_CHAT_VAR_ABORT_LEN
+#if ENABLE_FEATURE_CHAT_VAR_ABORT_LEN
 				max_abort_len = 0;
-# endif
-				for (l = aborts; l; l = l->link) {
-# if ENABLE_FEATURE_CHAT_VAR_ABORT_LEN
+#endif
+				for (llist_t *l = aborts; l; l = l->link) {
+#if ENABLE_FEATURE_CHAT_VAR_ABORT_LEN
 					size_t len = strlen(l->data);
-# endif
-					if (strcmp(arg, l->data) == 0) {
+#endif
+					if (!strcmp(arg, l->data)) {
 						llist_unlink(&aborts, l);
 						continue;
 					}
-# if ENABLE_FEATURE_CHAT_VAR_ABORT_LEN
+#if ENABLE_FEATURE_CHAT_VAR_ABORT_LEN
 					if (len > max_abort_len)
 						max_abort_len = len;
-# endif
+#endif
 				}
 #endif
 			} else if (DIR_TIMEOUT == key) {
@@ -214,20 +217,14 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 					timeout = DEFAULT_CHAT_TIMEOUT;
 			} else if (DIR_ECHO == key) {
 				// turn echo on/off
-				// N.B. echo means dumping device input/output to stderr
+				// N.B. echo means dumping output
+				// from stdin (device) to stderr
 				echo = onoff;
-			} else if (DIR_RECORD == key) {
-				// turn record on/off
-				// N.B. record means dumping device input to a file
-					// close previous record_fd
-				if (record_fd > 0)
-					close(record_fd);
-				// N.B. do we have to die here on open error?
-				record_fd = (onoff) ? xopen(arg, O_WRONLY|O_CREAT|O_TRUNC) : -1;
+//TODO?				echo_fd = onoff * STDERR_FILENO;
+//TODO?				echo_fd = xopen(arg, O_WRONLY|O_CREAT|O_TRUNC);
 			} else if (DIR_SAY == key) {
 				// just print argument verbatim
-				// TODO: should we use full_write() to avoid unistd/stdio conflict?
-				bb_error_msg("%s", arg);
+				fprintf(stderr, arg);
 			}
 			// next, please!
 			argv++;
@@ -291,18 +288,12 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 
 				// read next char from device
 				if (safe_read(STDIN_FILENO, buf+buf_len, 1) > 0) {
-					// dump device input if RECORD fname
-					if (record_fd > 0) {
-						full_write(record_fd, buf+buf_len, 1);
-					}
-					// dump device input if ECHO ON
-					if (echo) {
-//						if (buf[buf_len] < ' ') {
-//							full_write(STDERR_FILENO, "^", 1);
-//							buf[buf_len] += '@';
-//						}
+					// dump device output if ECHO ON or RECORD fname
+//TODO?					if (echo_fd > 0) {
+//TODO?						full_write(echo_fd, buf+buf_len, 1);
+//TODO?					}
+					if (echo > 0)
 						full_write(STDERR_FILENO, buf+buf_len, 1);
-					}
 					buf_len++;
 					// move input frame if we've reached higher bound
 					if (buf_len > COMMON_BUFSIZE) {
@@ -329,7 +320,7 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 				if (delta >= 0 && !memcmp(buf+delta, expect, expect_len))
 					goto expect_done;
 #undef buf
-			} /* while (have data) */
+			}
 
 			// device timed out or unexpected reply received
 			exitcode = ERR_TIMEOUT;
@@ -374,18 +365,21 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 					trim(++buf);
 					buf = loaded = xmalloc_xopen_read_close(buf, NULL);
 				}
+
 				// expand escape sequences in command
 				len = unescape(buf, &nocr);
 
 				// send command
-				alarm(timeout);
+#if ENABLE_FEATURE_CHAT_SEND_ESCAPES
 				pfd.fd = STDOUT_FILENO;
 				pfd.events = POLLOUT;
 				while (len && !exitcode
-				    && poll(&pfd, 1, -1) > 0
+				    && poll(&pfd, 1, timeout) > 0
 				    && (pfd.revents & POLLOUT)
 				) {
-#if ENABLE_FEATURE_CHAT_SEND_ESCAPES
+					// ugly! ugly! ugly!
+					// gotta send char by char to achieve this!
+					// Brrr...
 					// "\\d" means 1 sec delay, "\\p" means 0.01 sec delay
 					// "\\K" means send BREAK
 					char c = *buf;
@@ -395,28 +389,31 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 							sleep(1);
 							len--;
 							continue;
-						}
-						if ('p' == c) {
+						} else if ('p' == c) {
 							usleep(10000);
 							len--;
 							continue;
-						}
-						if ('K' == c) {
+						} else if ('K' == c) {
 							tcsendbreak(STDOUT_FILENO, 0);
 							len--;
 							continue;
+						} else {
+							buf--;
 						}
-						buf--;
 					}
-					if (safe_write(STDOUT_FILENO, buf, 1) != 1)
+					if (safe_write(STDOUT_FILENO, buf, 1) > 0) {
+						len--;
+						buf++;
+					} else
 						break;
-					len--;
-					buf++;
+				}
 #else
+//				if (len) {
+					alarm(timeout);
 					len -= full_write(STDOUT_FILENO, buf, len);
+					alarm(0);
+//				}
 #endif
-				} /* while (can write) */
-				alarm(0);
 
 				// report I/O error if there still exists at least one non-sent char
 				if (len)
@@ -430,12 +427,14 @@ int chat_main(int argc UNUSED_PARAM, char **argv)
 				else if (!nocr)
 					xwrite(STDOUT_FILENO, "\r", 1);
 #endif
+
 				// bail out unless we sent command successfully
 				if (exitcode)
 					break;
-			} /* if (*argv) */
+
+			}
 		}
-	} /* while (*argv) */
+	}
 
 #if ENABLE_FEATURE_CHAT_TTY_HIFI
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &tio0);

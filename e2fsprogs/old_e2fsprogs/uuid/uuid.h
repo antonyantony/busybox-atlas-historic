@@ -32,8 +32,9 @@
  * DAMAGE.
  * %End-Header%
  */
-#ifndef UUID_UUID_H
-#define UUID_UUID_H 1
+
+#ifndef _UUID_UUID_H
+#define _UUID_UUID_H
 
 #include <sys/types.h>
 #include <time.h>

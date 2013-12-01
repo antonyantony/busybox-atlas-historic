@@ -50,7 +50,7 @@
 #define O_RESOLV_CONF  1003
 #define O_PREPEND_PROBE_ID  1004
 #define O_EVDNS 1005
-#define O_NO_EVDNS 1006
+#define O_RETRY 1006
 
 #define DNS_FLAG_RD 0x0100
 
@@ -64,10 +64,11 @@
 #define MAX_DNS_OUT_BUF_SIZE   512
 
 /* Intervals and timeouts (all are in milliseconds unless otherwise specified) */
-#define DEFAULT_NOREPLY_TIMEOUT 5000           /* 1000 msec - 0 is illegal      */
+#define DEFAULT_NOREPLY_TIMEOUT 5000           /* 5000 msec - 0 is illegal      */
 #define DEFAULT_LINE_LENGTH 80 
 #define DEFAULT_STATS_REPORT_INTERVEL 180 		/* in seconds */
 #define CONN_TO            5  /* TCP connection time out in seconds */
+#define DEFAULT_RETRY_MAX 10 
 
 /* state of the dns query */
 #define STATUS_DNS_RESOLV 		1001
@@ -75,8 +76,7 @@
 #define STATUS_TCP_CONNECTED 		1003
 #define STATUS_TCP_WRITE 		1004
 #define STATUS_NEXT_QUERY		1005
-#define STATUS_RETRANSMIT_QUERY		1006
-
+#define STATUS_RETRANSMIT_QUERY         1006
 #define STATUS_FREE 			0
 
 // seems T_DNSKEY is not defined header files of lenny and sdk
@@ -190,7 +190,7 @@ struct query_state {
 	int opt_rd;
 	int opt_prepend_probe_id;
 	int opt_evdns;
-	 
+	int opt_retry_max;
 	int retry;
 
 	char * str_Atlas; 
@@ -324,6 +324,8 @@ static struct option longopts[]=
 	{ "ds", required_argument, NULL, (100000 + T_DS) },
 	{ "rrsig", required_argument, NULL, (100000 + T_RRSIG) },
 	{ "soa", required_argument, NULL, 's' },
+	{ "srv", required_argument, NULL, (100000 + T_SRV) },
+	{ "naptr", required_argument, NULL, (100000 + T_NAPTR) },
 
 	// clas CHAOS
 	{ "hostname.bind", no_argument, NULL, 'h' },
@@ -336,12 +338,12 @@ static struct option longopts[]=
 	{ "nsid", no_argument, NULL, 'n' },
 	{ "d0", no_argument, NULL, 'd' },
  	
+	{ "retry",  required_argument, NULL, O_RETRY },
 	{ "resolv", no_argument, NULL, O_RESOLV_CONF },
 	{ "qbuf", no_argument, NULL, 1001 },
 	{ "noabuf", no_argument, NULL, 1002 },
 
 	{ "evdns", no_argument, NULL, O_EVDNS },
-	{ "noevdns", no_argument, NULL, O_NO_EVDNS },
 	{ "out-file", required_argument, NULL, 'O' },
 	{ "p_probe_id", no_argument, NULL, O_PREPEND_PROBE_ID },
 	{ NULL, }
@@ -385,7 +387,7 @@ int evtdig_main(int argc, char **argv)
 		crondlog(LVL9 "event_base_new failed"); /* exits */
 	}
 
-	qry = tdig_init(argc, argv, NULL);
+	qry = tdig_init(argc, argv, local_exit);
 	if(!qry) {
 		crondlog(DIE9 "evdns_base_new failed"); /* exits */
 		event_base_free	(EventBase);
@@ -433,7 +435,7 @@ void print_txt_json(unsigned char *rdata, int txt_len, FILE *fh)
 
 static void local_exit(void *state UNUSED_PARAM)
 {
-	//fprintf(stderr, "And we are done\n");
+	fprintf(stderr, "And we are done\n");
 	exit(0);
 }
 
@@ -725,10 +727,33 @@ static void tdig_send_query_callback(int unused UNUSED_PARAM, const short event 
 
 static void next_qry_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h) {
 	struct query_state *qry = h;
-	BLURT(LVL5 "next query for %s retry %d",  qry->server_name, qry->retry);
-			
+	BLURT(LVL5 "next query for %s",  qry->server_name);
 	tdig_start(qry);  
 }
+
+/* The callback to handle timeouts due to destination host unreachable condition */
+static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
+{
+	struct timeval asap = { 0, 0 };
+	struct query_state *qry = h;
+	qry->base->timeout++;
+	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
+	buf_add(&qry->err, line, strlen(line));
+
+	BLURT(LVL5 "AAA timeout for %s retry %d/%d ", qry->server_name, qry->retry,  qry->opt_retry_max);
+	if (qry->retry < qry->opt_retry_max) {
+		qry->retry++;
+		free_qry_inst(qry);
+		qry->qst = STATUS_RETRANSMIT_QUERY;
+		evtimer_add(&qry->next_qry_timer, &asap);
+	} else {
+		printReply (qry, 0, NULL);
+	}
+
+	return;
+}
+
+
 
 static void tcp_timeout_callback (int __attribute((unused)) unused, 
 		const short __attribute((unused)) event, void *s)
@@ -777,11 +802,11 @@ static void tcp_reporterr(struct tu_env *env, enum tu_err cause,
                 crondlog(DIE9 "reporterr: bad cause %d", cause);
 		break;
         }
-	if (qry->retry < 10) {
+	if (qry->retry < qry->opt_retry_max) {
 		qry->retry++;
 		free_qry_inst(qry);
 		qry->qst = STATUS_RETRANSMIT_QUERY;
-		evtimer_add(&qry->next_qry_timer, &asap);	
+		evtimer_add(&qry->next_qry_timer, &asap);
 	} else {
 		printReply (qry, 0, NULL);
 	}
@@ -1049,6 +1074,7 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	tdig_base->activeqry++;
 	qry->qst = 0;
 	qry->retry  = 0;
+	qry->opt_retry_max = DEFAULT_RETRY_MAX;
 	qry->wire_size = 0;
 	qry->triptime = 0;
 	qry->opt_edns0 = 512; 
@@ -1057,7 +1083,7 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	qry->opt_qbuf = 0; 
 	qry->opt_abuf = 1; 
 	qry->opt_rd = 0;
-	qry->opt_evdns = 1;
+	qry->opt_evdns = 0;
 	qry->opt_prepend_probe_id = 0;
 	qry->ressave = NULL;
 	qry->ressent = NULL;
@@ -1099,6 +1125,13 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 				break;
 
 			case 'A':
+				if (!validate_atlas_id(optarg))
+				{
+					crondlog(LVL8 "bad atlas ID '%s'",
+						optarg);
+					tdig_delete(qry);
+					return NULL;
+				}
 				qry->str_Atlas = strdup(optarg);
 				break;
 			case 'b':
@@ -1155,6 +1188,10 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 				qry->opt_abuf = 0;
 				break;
 
+			case O_RETRY :
+				qry->opt_retry_max = strtoul(optarg, NULL, 10);
+				break;
+
 			case O_RESOLV_CONF :
 				qry->opt_resolv_conf = Q_RESOLV_CONF ;
 				qry->opt_v6_only = 1;
@@ -1167,10 +1204,6 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 
 			case O_EVDNS:
 				qry->opt_evdns = 1;
-				break;
-
-			case O_NO_EVDNS:
-				qry->opt_evdns = 0;
 				break;
 
 			case (100000 + T_A):
@@ -1255,7 +1288,19 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 				qry->qtype = T_RRSIG;
 				qry->qclass = C_IN;
 				qry->lookupname = strdup(optarg);
-				break;break;
+				break;
+
+			case (100000 + T_SRV):
+				qry->qtype = T_SRV;
+				qry->qclass = C_IN;
+				qry->lookupname = strdup(optarg);
+				break;
+
+			case (100000 + T_NAPTR):
+				qry->qtype = T_NAPTR;
+				qry->qclass = C_IN;
+				qry->lookupname = strdup(optarg);
+				break;
 
 			default:
 				fprintf(stderr, "ERROR unknown option %d ??\n", c); 
@@ -1291,16 +1336,23 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	else 
 		qry->server_name = strdup(argv[optind]);
 
-	 if(qry->lookupname == NULL) {
+	if (qry->lookupname == NULL) {
 		crondlog(LVL9 "ERROR no query in command line");
 		tdig_delete(qry);
 		return NULL;
 	}
 
+	if (qry->lookupname[strlen(qry->lookupname) - 1] != '.') {
+		crondlog(LVL9 "ERROR query %s does not end with a dot ", qry->lookupname);
+		tdig_delete(qry);
+		return NULL;
+	}
+
+
 	if (qry->out_filename &&
 		!validate_filename(qry->out_filename, SAFE_PREFIX))
 	{
-		crondlog(LVL8 "insecure file '%s' allowed %s", qry->out_filename, SAFE_PREFIX);
+		crondlog(LVL8 "insecure file '%s'", qry->out_filename);
 		tdig_delete(qry);
 		return NULL;
 	}
@@ -1689,29 +1741,6 @@ static void free_qry_inst(struct query_state *qry)
 	
 }
 
-/* The callback to handle timeouts due to destination host unreachable condition */
-static void noreply_callback(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
-{
-	struct timeval asap = { 0, 0 };
-	struct query_state *qry = h;
-	qry->base->timeout++;
-	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
-	buf_add(&qry->err, line, strlen(line));
-
-	BLURT(LVL5 "AAA timeout for %s ", qry->server_name);
-	
-	if (qry->retry < 10) {
-		qry->retry++;
-		free_qry_inst(qry);
-		qry->qst = STATUS_RETRANSMIT_QUERY;
-		evtimer_add(&qry->next_qry_timer, &asap);	
-	} else {
-		printReply (qry, 0, NULL);
-	}
-
-	return;
-} 
-
 
 static int tdig_delete(void *state)
 {
@@ -1789,15 +1818,21 @@ void printErrorQuick (struct query_state *qry)
 		fh = stdout;
 
 	fprintf(fh, "RESULT { ");
-	if(qry->str_Atlas) 
-	{
-		JS(id,  qry->str_Atlas);
-	}
+
+	JS(id, "9202");
 	gettimeofday(&now, NULL);
 	JS1(time, %ld,  now.tv_sec);
 
-	snprintf(line, DEFAULT_LINE_LENGTH, "\"query busy\": \"too frequent. previous one is not done yet\"");
-	fprintf(fh, "\"error\" : { %s }" , line);
+	snprintf(line, DEFAULT_LINE_LENGTH, "\"query busy\": \"too frequent."
+			"previous one is not done yet\"");
+	fprintf(fh, "\"error\" : [{ %s }" , line);
+	if(qry->str_Atlas)
+	{
+		fprintf(fh, ",{" , line);
+		JS_NC(id,  qry->str_Atlas);
+		fprintf(fh, "}" , line);
+	}
+	fprintf(fh, "]");
 
 	fprintf(fh, " }");
 	fprintf(fh, "\n");
@@ -1881,6 +1916,9 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 		if(strlen(line)) 
 			JS(src_addr, line); 
 	}
+	if(qry->retry) {
+		JS1(retry, %d,  qry->retry);
+	}
 
 	JS_NC(proto, qry->opt_proto == 6 ? "TCP" : "UDP" );
 	if(qry->opt_qbuf && qry->qbuf.size) {
@@ -1889,11 +1927,6 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 		JC;
 		JS_NC(qbuf, qry->qbuf.buf );
 	} 
-      
-	if(qry->retry) {
-		JS1(retry, %d,  qry->retry);
-	}
-
 
 	if(result)
 	{
@@ -2026,8 +2059,7 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 		}
 
 		fprintf (fh , " }"); //result
-	}
-
+	} 
 	if(qry->err.size) 
 	{
 		line[0]  = '\0';
@@ -2038,6 +2070,7 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 	fprintf(fh, "\n");
 	if (qry->out_filename)
 		fclose(fh);
+	qry->retry = 0;
 	free_qry_inst(qry);
 }
 

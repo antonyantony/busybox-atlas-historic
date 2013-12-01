@@ -4,80 +4,59 @@
  *
  * Copyright (C) 2007 Bernhard Reutner-Fischer
  *
- * Based on a older version that was in busybox which was 1k big.
+ * Based on a older version that was in busybox which was 1k big..
  *   Copyright (C) 2001 by Emanuele Aina <emanuele.aina@tiscali.it>
  *
  * Based on the Debian run-parts program, version 1.15
  *   Copyright (C) 1996 Jeff Noxon <jeff@router.patch.net>,
  *   Copyright (C) 1996-1999 Guy Maor <maor@debian.org>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ *
+ * Licensed under GPL v2 or later, see file LICENSE in this tarball for details.
  */
 
 /* This is my first attempt to write a program in C (well, this is my first
  * attempt to write a program! :-) . */
 
 /* This piece of code is heavily based on the original version of run-parts,
- * taken from debian-utils. I've only removed the long options and the
+ * taken from debian-utils. I've only removed the long options and a the
  * report mode. As the original run-parts support only long options, I've
  * broken compatibility because the BusyBox policy doesn't allow them.
+ * The supported options are:
+ * -t           test. Print the name of the files to be executed, without
+ *              execute them.
+ * -a ARG       argument. Pass ARG as an argument the program executed. It can
+ *              be repeated to pass multiple arguments.
+ * -u MASK      umask. Set the umask of the program executed to MASK.
  */
-
-//usage:#define run_parts_trivial_usage
-//usage:       "[-a ARG]... [-u UMASK] "
-//usage:       IF_FEATURE_RUN_PARTS_LONG_OPTIONS("[--reverse] [--test] [--exit-on-error] "IF_FEATURE_RUN_PARTS_FANCY("[--list] "))
-//usage:       "DIRECTORY"
-//usage:#define run_parts_full_usage "\n\n"
-//usage:       "Run a bunch of scripts in DIRECTORY\n"
-//usage:     "\n	-a ARG		Pass ARG as argument to scripts"
-//usage:     "\n	-u UMASK	Set UMASK before running scripts"
-//usage:	IF_FEATURE_RUN_PARTS_LONG_OPTIONS(
-//usage:     "\n	--reverse	Reverse execution order"
-//usage:     "\n	--test		Dry run"
-//usage:     "\n	--exit-on-error	Exit if a script exits with non-zero"
-//usage:	IF_FEATURE_RUN_PARTS_FANCY(
-//usage:     "\n	--list		Print names of matching files even if they are not executable"
-//usage:	)
-//usage:	)
-//usage:
-//usage:#define run_parts_example_usage
-//usage:       "$ run-parts -a start /etc/init.d\n"
-//usage:       "$ run-parts -a stop=now /etc/init.d\n\n"
-//usage:       "Let's assume you have a script foo/dosomething:\n"
-//usage:       "#!/bin/sh\n"
-//usage:       "for i in $*; do eval $i; done; unset i\n"
-//usage:       "case \"$1\" in\n"
-//usage:       "start*) echo starting something;;\n"
-//usage:       "stop*) set -x; shutdown -h $stop;;\n"
-//usage:       "esac\n\n"
-//usage:       "Running this yields:\n"
-//usage:       "$run-parts -a stop=+4m foo/\n"
-//usage:       "+ shutdown -h +4m"
 
 #include "libbb.h"
 
 struct globals {
 	char **names;
 	int    cur;
-	char  *cmd[2 /* using 1 provokes compiler warning */];
-} FIX_ALIASING;
+	char  *cmd[1];
+};
 #define G (*(struct globals*)&bb_common_bufsiz1)
 #define names (G.names)
 #define cur   (G.cur  )
 #define cmd   (G.cmd  )
-#define INIT_G() do { } while (0)
 
 enum { NUM_CMD = (COMMON_BUFSIZE - sizeof(G)) / sizeof(cmd[0]) - 1 };
 
 enum {
-	OPT_a = (1 << 0),
-	OPT_u = (1 << 1),
-	OPT_r = (1 << 2) * ENABLE_FEATURE_RUN_PARTS_LONG_OPTIONS,
-	OPT_t = (1 << 3) * ENABLE_FEATURE_RUN_PARTS_LONG_OPTIONS,
-	OPT_e = (1 << 4) * ENABLE_FEATURE_RUN_PARTS_LONG_OPTIONS,
-	OPT_l = (1 << 5) * ENABLE_FEATURE_RUN_PARTS_LONG_OPTIONS
-			* ENABLE_FEATURE_RUN_PARTS_FANCY,
+	OPT_r = (1 << 0),
+	OPT_a = (1 << 1),
+	OPT_u = (1 << 2),
+	OPT_t = (1 << 3),
+	OPT_l = (1 << 4) * ENABLE_FEATURE_RUN_PARTS_FANCY,
 };
+
+#if ENABLE_FEATURE_RUN_PARTS_FANCY
+#define list_mode (option_mask32 & OPT_l)
+#else
+#define list_mode 0
+#endif
 
 /* Is this a valid filename (upper/lower alpha, digits,
  * underscores, and hyphens only?)
@@ -106,7 +85,7 @@ static int FAST_FUNC act(const char *file, struct stat *statbuf, void *args UNUS
 	if (depth == 2
 	 && (  !(statbuf->st_mode & (S_IFREG | S_IFLNK))
 	    || invalid_name(file)
-	    || (!(option_mask32 & OPT_l) && access(file, X_OK) != 0))
+	    || (!list_mode && access(file, X_OK) != 0))
 	) {
 		return SKIP;
 	}
@@ -122,12 +101,11 @@ static int FAST_FUNC act(const char *file, struct stat *statbuf, void *args UNUS
 static const char runparts_longopts[] ALIGN1 =
 	"arg\0"     Required_argument "a"
 	"umask\0"   Required_argument "u"
-//TODO: "verbose\0" No_argument       "v"
-	"reverse\0" No_argument       "\xf0"
-	"test\0"    No_argument       "\xf1"
-	"exit-on-error\0" No_argument "\xf2"
+	"test\0"    No_argument       "t"
 #if ENABLE_FEATURE_RUN_PARTS_FANCY
-	"list\0"    No_argument       "\xf3"
+	"list\0"    No_argument       "l"
+	"reverse\0" No_argument       "r"
+//TODO: "verbose\0" No_argument       "v"
 #endif
 	;
 #endif
@@ -140,14 +118,13 @@ int run_parts_main(int argc UNUSED_PARAM, char **argv)
 	unsigned n;
 	int ret;
 
-	INIT_G();
-
 #if ENABLE_FEATURE_RUN_PARTS_LONG_OPTIONS
 	applet_long_options = runparts_longopts;
 #endif
 	/* We require exactly one argument: the directory name */
+	/* We require exactly one argument: the directory name */
 	opt_complementary = "=1:a::";
-	getopt32(argv, "a:u:", &arg_list, &umask_p);
+	getopt32(argv, "ra:u:t"USE_FEATURE_RUN_PARTS_FANCY("l"), &arg_list, &umask_p);
 
 	umask(xstrtou_range(umask_p, 8, 0, 07777));
 
@@ -182,17 +159,14 @@ int run_parts_main(int argc UNUSED_PARAM, char **argv)
 			continue;
 		}
 		cmd[0] = name;
-		ret = spawn_and_wait(cmd);
+		ret = wait4pid(spawn(cmd));
 		if (ret == 0)
 			continue;
 		n = 1;
 		if (ret < 0)
-			bb_perror_msg("can't execute '%s'", name);
+			bb_perror_msg("can't exec %s", name);
 		else /* ret > 0 */
-			bb_error_msg("%s exited with code %d", name, ret & 0xff);
-
-		if (option_mask32 & OPT_e)
-			xfunc_die();
+			bb_error_msg("%s exited with code %d", name, ret);
 	}
 
 	return n;

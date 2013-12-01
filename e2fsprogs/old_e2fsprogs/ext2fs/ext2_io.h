@@ -9,8 +9,9 @@
  * License.
  * %End-Header%
  */
-#ifndef EXT2FS_EXT2_IO_H
-#define EXT2FS_EXT2_IO_H 1
+
+#ifndef _EXT2FS_EXT2_IO_H
+#define _EXT2FS_EXT2_IO_H
 
 /*
  * ext2_loff_t is defined here since unix_io.c needs it.
@@ -109,4 +110,5 @@ extern void (*test_io_cb_write_blk)
 extern void (*test_io_cb_set_blksize)
 	(int blksize, errcode_t err);
 
-#endif
+#endif /* _EXT2FS_EXT2_IO_H */
+

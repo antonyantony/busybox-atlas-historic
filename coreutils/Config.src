@@ -70,7 +70,11 @@ config CONDMV
 	bool "condmv"
 	default n
 	help
+<<<<<<< HEAD:coreutils/Config.src
 	 condmv is used to rename a file if the destination does not exist
+=======
+	  condmv is used to rename a file if the destination does not exist
+>>>>>>> ripe-atlas-fw-4550:coreutils/Config.in
 
 config CP
 	bool "cp"
@@ -137,6 +141,13 @@ config DF
 	help
 	  df reports the amount of disk space used and available
 	  on filesystems.
+
+config DFRM
+	bool "dfrm"
+	default n
+	help
+	  dfrm deletes files from directories when the amount of free space is
+	  too low
 
 config FEATURE_DF_FANCY
 	bool "Enable -a, -i, -B"
@@ -554,6 +565,13 @@ config FEATURE_FLOAT_SLEEP
 	help
 	  Allow for fractional numeric parameters.
 
+config SLEEPKICK
+	bool "sleepkick"
+	default n
+	help
+	  sleep is used to pause for a specified number of seconds.
+          And kick the /dev/watchdog every x seconds. RIPE ATLAS. Antony
+	  
 config SORT
 	bool "sort"
 	default y

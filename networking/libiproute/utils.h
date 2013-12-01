@@ -1,12 +1,14 @@
 /* vi: set sw=4 ts=4: */
-#ifndef UTILS_H
-#define UTILS_H 1
+#ifndef __UTILS_H__
+#define __UTILS_H__ 1
 
 #include "libnetlink.h"
 #include "ll_map.h"
 #include "rtm_map.h"
 
-PUSH_AND_SET_FUNCTION_VISIBILITY_TO_HIDDEN
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility push(hidden)
+#endif
 
 extern family_t preferred_family;
 extern smallint show_stats;    /* UNUSED */
@@ -17,14 +19,14 @@ extern smallint oneline;
 extern char _SL_;
 
 #ifndef IPPROTO_ESP
-#define IPPROTO_ESP  50
+#define IPPROTO_ESP	50
 #endif
 #ifndef IPPROTO_AH
-#define IPPROTO_AH  51
+#define IPPROTO_AH	51
 #endif
 
 #define SPRINT_BSIZE 64
-#define SPRINT_BUF(x)  char x[SPRINT_BSIZE]
+#define SPRINT_BUF(x)	char x[SPRINT_BSIZE]
 
 extern void incomplete_command(void) NORETURN;
 
@@ -58,26 +60,28 @@ struct ipx_addr {
 
 extern uint32_t get_addr32(char *name);
 extern int get_addr_1(inet_prefix *dst, char *arg, int family);
-/*extern void get_prefix_1(inet_prefix *dst, char *arg, int family);*/
+extern int get_prefix_1(inet_prefix *dst, char *arg, int family);
 extern int get_addr(inet_prefix *dst, char *arg, int family);
-extern void get_prefix(inet_prefix *dst, char *arg, int family);
+extern int get_prefix(inet_prefix *dst, char *arg, int family);
 
-extern unsigned get_unsigned(char *arg, const char *errmsg);
-extern uint32_t get_u32(char *arg, const char *errmsg);
-extern uint16_t get_u16(char *arg, const char *errmsg);
+extern int get_integer(int *val, char *arg, int base);
+extern int get_unsigned(unsigned *val, char *arg, int base);
+#define get_byte get_u8
+#define get_ushort get_u16
+#define get_short get_s16
+extern int get_u32(uint32_t *val, char *arg, int base);
+extern int get_u16(uint16_t *val, char *arg, int base);
+extern int get_s16(int16_t *val, char *arg, int base);
+extern int get_u8(uint8_t *val, char *arg, int base);
+extern int get_s8(int8_t *val, char *arg, int base);
 
-extern const char *rt_addr_n2a(int af, void *addr, char *buf, int buflen);
-#ifdef RESOLVE_HOSTNAMES
 extern const char *format_host(int af, int len, void *addr, char *buf, int buflen);
-#else
-#define format_host(af, len, addr, buf, buflen) \
-	rt_addr_n2a(af, addr, buf, buflen)
-#endif
+extern const char *rt_addr_n2a(int af, int len, void *addr, char *buf, int buflen);
 
 void invarg(const char *, const char *) NORETURN;
 void duparg(const char *, const char *) NORETURN;
 void duparg2(const char *, const char *) NORETURN;
-int inet_addr_match(const inet_prefix *a, const inet_prefix *b, int bits);
+int inet_addr_match(inet_prefix *a, inet_prefix *b, int bits);
 
 const char *dnet_ntop(int af, const void *addr, char *str, size_t len);
 int dnet_pton(int af, const char *src, void *addr);
@@ -85,6 +89,8 @@ int dnet_pton(int af, const char *src, void *addr);
 const char *ipx_ntop(int af, const void *addr, char *str, size_t len);
 int ipx_pton(int af, const char *src, void *addr);
 
-POP_SAVED_FUNCTION_VISIBILITY
-
+#if __GNUC_PREREQ(4,1)
+# pragma GCC visibility pop
 #endif
+
+#endif /* __UTILS_H__ */

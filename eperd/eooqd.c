@@ -15,8 +15,8 @@
 #include "eperd.h"
 
 #define SUFFIX 		".curr"
-#define OOQD_NEW_PREFIX	CONFIG_FEATURE_EPERD_NEW_DIR"/eooq"
-#define OOQD_OUT	CONFIG_FEATURE_EPERD_OUT_DIR"/eooq"
+#define OOQD_NEW_PREFIX	"/home/atlas/data/new/ooq"
+#define OOQD_OUT	"/home/atlas/data/ooq.out/ooq"
 
 #define ATLAS_NARGS	64	/* Max arguments to a built-in command */
 #define ATLAS_ARGSIZE	512	/* Max size of the command line */
@@ -28,6 +28,7 @@
 struct slot
 {
 	void *cmdstate;
+	struct builtin *bp;
 };
 
 static struct 
@@ -51,10 +52,12 @@ static struct builtin
 	{ "evhttpget", &httpget_ops },
 	{ "evping", &ping_ops },
 	{ "evtdig", &tdig_ops },
+	{ "evsslgetcert", &sslgetcert_ops },
 	{ "evtraceroute", &traceroute_ops },
 	{ NULL, NULL }
 };
 
+static const char *atlas_id;
 
 static void process(FILE *file);
 static void report(const char *fmt, ...);
@@ -74,7 +77,7 @@ int eooqd_main(int argc, char *argv[])
 {
 	int r;
 	uint32_t opt;
-	char *atlas_id, *pid_file_name;
+	char *pid_file_name;
 	struct event *checkQueueEvent, *rePostEvent;
 	struct timeval tv;
 
@@ -99,7 +102,7 @@ int eooqd_main(int argc, char *argv[])
 	state->atlas_id= atlas_id;
 	state->queue_file= argv[optind];
 
-	state->max_busy= 50;
+	state->max_busy= 10;
 
 	state->slots= xzalloc(sizeof(*state->slots) * state->max_busy);
 
@@ -123,11 +126,6 @@ int eooqd_main(int argc, char *argv[])
 	DnsBase= evdns_base_new(EventBase, 1 /*initialize*/);
 	if (!DnsBase)
 	{
-		crondlog(DIE9 "evdns_base_new failed"); /* exits */
-	}
-
-	DnsBase = evdns_base_new(EventBase, 1); 
-	if(!DnsBase) {
 		event_base_free(EventBase);
 		crondlog(DIE9 "evdns_base_new failed"); /* exits */
 	}
@@ -355,7 +353,7 @@ static void add_line(void)
 	if (state->slots[slot].cmdstate != NULL)
 		crondlog(DIE9 "no empty slot?");
 	argv[argc++]= "-O";
-	snprintf(filename, sizeof(filename), OOQD_NEW_PREFIX);
+	snprintf(filename, sizeof(filename), OOQD_NEW_PREFIX ".%d", slot);
 	argv[argc++]= filename;
 
 	argv[argc]= NULL;
@@ -369,6 +367,7 @@ static void add_line(void)
 	if (cmdstate != NULL)
 	{
 		state->slots[slot].cmdstate= cmdstate;
+		state->slots[slot].bp= bp;
 		state->curr_index= slot;
 		state->curr_busy++;
 
@@ -421,7 +420,7 @@ error:
 
 static void cmddone(void *cmdstate)
 {
-	int i;
+	int i, r;
 	char from_filename[80];
 	char to_filename[80];
 	struct stat sb;
@@ -439,10 +438,15 @@ static void cmddone(void *cmdstate)
 		report("cmddone: state state %p", cmdstate);
 		return;
 	}
-	state->slots[i].cmdstate= NULL;
-	state->curr_busy--;
+	r= state->slots[i].bp->testops->delete(cmdstate);
+	if (r != 0)
+	{
+		state->slots[i].cmdstate= NULL;
+		state->curr_busy--;
+	}
+	else
+		report("cmddone: strange, cmd %p is busy", cmdstate);
 
-#if 0
 	snprintf(from_filename, sizeof(from_filename),
 		"/home/atlas/data/new/ooq.%d", i);
 	snprintf(to_filename, sizeof(to_filename),
@@ -463,7 +467,55 @@ static void cmddone(void *cmdstate)
 	{
 		post_results();
 	}
-#endif
+}
+
+#define RESOLV_CONF	"/etc/resolv.conf"
+static void check_resolv_conf2(const char *out_file, const char *atlasid)
+{
+	static time_t last_time= -1;
+
+	int r;
+	FILE *fn;
+	struct stat sb;
+
+	r= stat(RESOLV_CONF, &sb);
+	if (r == -1)
+	{
+		crondlog(LVL8 "error accessing resolv.conf: %s",
+			strerror(errno));
+		return;
+	}
+
+	if (sb.st_mtime == last_time)
+		return;	/* resolv.conf did not change */
+	evdns_base_clear_nameservers_and_suspend(DnsBase);
+	r= evdns_base_resolv_conf_parse(DnsBase, DNS_OPTIONS_ALL,
+		RESOLV_CONF);
+	evdns_base_resume(DnsBase);
+
+	if (r != 0 || last_time != -1)
+	{
+		fn= fopen(out_file, "a");
+		if (!fn)
+			crondlog(DIE9 "unable to append to '%s'", out_file);
+		fprintf(fn, "RESULT { ");
+		if (atlasid)
+			fprintf(fn, DBQ(id) ":" DBQ(%s) ", ", atlasid);
+		fprintf(fn, DBQ(fw) ":" DBQ(%d) ", " DBQ(time) ":%ld, ",
+			get_atlas_fw_version(), (long)time(NULL));
+		fprintf(fn, DBQ(event) ": " DBQ(load resolv.conf)
+			", " DBQ(result) ": %d", r);
+
+		fprintf(fn, " }\n");
+		fclose(fn);
+	}
+
+	last_time= sb.st_mtime;
+}
+
+static void check_resolv_conf(void)
+{
+	check_resolv_conf1();
 }
 
 static void re_post(evutil_socket_t fd UNUSED_PARAM, short what UNUSED_PARAM,

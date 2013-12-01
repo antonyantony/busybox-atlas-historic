@@ -5,7 +5,7 @@
  * Copyright (C) 2004  Peter Willis <psyphreak@phreaker.net>
  * Copyright (C) 2005  Tito Ragusa <farmatito@tiscali.it>
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under the GPL v2 or later, see the file LICENSE in this tarball.
  */
 
 /*
@@ -13,22 +13,7 @@
  * Most of the dirty work blatantly ripped off from cat.c =)
  */
 
-//usage:#define eject_trivial_usage
-//usage:       "[-t] [-T] [DEVICE]"
-//usage:#define eject_full_usage "\n\n"
-//usage:       "Eject DEVICE or default /dev/cdrom\n"
-//usage:	IF_FEATURE_EJECT_SCSI(
-//usage:     "\n	-s	SCSI device"
-//usage:	)
-//usage:     "\n	-t	Close tray"
-//usage:     "\n	-T	Open/close tray (toggle)"
-
-#include <sys/mount.h>
 #include "libbb.h"
-/* Must be after libbb.h: they need size_t */
-#include "fix_u32.h"
-#include <scsi/sg.h>
-#include <scsi/scsi.h>
 
 /* various defines swiped from linux/cdrom.h */
 #define CDROMCLOSETRAY            0x5319  /* pendant of CDROMEJECT  */
@@ -41,6 +26,9 @@
 
 /* Code taken from the original eject (http://eject.sourceforge.net/),
  * refactored it a bit for busybox (ne-bb@nicoerfurth.de) */
+
+#include <scsi/sg.h>
+#include <scsi/scsi.h>
 
 static void eject_scsi(const char *dev)
 {
@@ -86,7 +74,7 @@ static void eject_cdrom(unsigned flags, const char *dev)
 	int cmd = CDROMEJECT;
 
 	if (flags & FLAG_CLOSE
-	 || ((flags & FLAG_SMART) && ioctl(dev_fd, CDROM_DRIVE_STATUS) == CDS_TRAY_OPEN)
+	 || (flags & FLAG_SMART && ioctl(dev_fd, CDROM_DRIVE_STATUS) == CDS_TRAY_OPEN)
 	) {
 		cmd = CDROMCLOSETRAY;
 	}
@@ -101,7 +89,7 @@ int eject_main(int argc UNUSED_PARAM, char **argv)
 	const char *device;
 
 	opt_complementary = "?1:t--T:T--t";
-	flags = getopt32(argv, "tT" IF_FEATURE_EJECT_SCSI("s"));
+	flags = getopt32(argv, "tT" USE_FEATURE_EJECT_SCSI("s"));
 	device = argv[optind] ? argv[optind] : "/dev/cdrom";
 
 	/* We used to do "umount <device>" here, but it was buggy
@@ -114,7 +102,7 @@ int eject_main(int argc UNUSED_PARAM, char **argv)
 	   eject /dev/cdrom
 	*/
 
-	xmove_fd(xopen_nonblocking(device), dev_fd);
+	xmove_fd(xopen(device, O_RDONLY|O_NONBLOCK), dev_fd);
 
 	if (ENABLE_FEATURE_EJECT_SCSI && (flags & FLAG_SCSI))
 		eject_scsi(device);

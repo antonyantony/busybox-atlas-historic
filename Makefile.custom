@@ -2,13 +2,8 @@
 # Build system
 # ==========================================================================
 
-busybox.links: $(srctree)/applets/busybox.mkll $(objtree)/include/autoconf.h include/applets.h
-	$(Q)-$(SHELL) $^ > $@
-
-busybox.cfg.suid: $(srctree)/applets/busybox.mksuid $(objtree)/include/autoconf.h include/applets.h
-	$(Q)-SUID="yes" $(SHELL) $^ > $@
-busybox.cfg.nosuid: $(srctree)/applets/busybox.mksuid $(objtree)/include/autoconf.h include/applets.h
-	$(Q)-SUID="DROP" $(SHELL) $^ > $@
+busybox.links: $(srctree)/applets/busybox.mkll $(objtree)/include/autoconf.h $(srctree)/include/applets.h
+	$(Q)-$(SHELL) $^ >$@
 
 .PHONY: install
 ifeq ($(CONFIG_INSTALL_APPLET_SYMLINKS),y)
@@ -69,14 +64,6 @@ release: distclean
 		-name .svn \
 		-print \
 		-exec rm -r -f {} \; ; \
-	find busybox-$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)/ -type d \
-		-name .git \
-		-print \
-		-exec rm -r -f {} \; ; \
-	find busybox-$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)/ -type f \
-		-name .gitignore \
-		-print \
-		-exec rm -f {} \; ; \
 	find busybox-$(VERSION).$(PATCHLEVEL).$(SUBLEVEL)$(EXTRAVERSION)/ -type f \
 		-name .\#* \
 		-print \
@@ -116,38 +103,32 @@ bigdata: busybox_unstripped
 
 # Documentation Targets
 .PHONY: doc
-doc: docs/busybox.pod docs/BusyBox.txt docs/busybox.1 docs/BusyBox.html
+doc: docs/busybox.pod docs/BusyBox.txt docs/BusyBox.1 docs/BusyBox.html
 
 # FIXME: Doesn't belong here
-       cmd_doc =
- quiet_cmd_doc = $(Q)echo "  DOC     $(@F)"
-silent_cmd_doc =
-disp_doc       = $($(quiet)cmd_doc)
+disp_doc = \
+  @$(if $(quiet),echo "  DOC     $(@F)")
 
-# sed adds newlines after "Options:" etc,
-# this is needed in order to get good BusyBox.{1,txt,html}
 docs/busybox.pod: $(srctree)/docs/busybox_header.pod \
-		include/usage.h \
+		$(srctree)/include/usage.h \
 		$(srctree)/docs/busybox_footer.pod \
-		applets/usage_pod
+		$(srctree)/docs/autodocifier.pl
 	$(disp_doc)
 	$(Q)-mkdir -p docs
-	$(Q)-( \
-	    cat $(srctree)/docs/busybox_header.pod; \
-	    echo; \
-	    applets/usage_pod | sed 's/^[A-Za-z][A-Za-z ]*[a-z]:$$/&\n/'; \
-	    cat $(srctree)/docs/busybox_footer.pod; \
-	    ) > docs/busybox.pod
+	$(Q)-( cat $(srctree)/docs/busybox_header.pod ; \
+	    $(srctree)/docs/autodocifier.pl $(srctree)/include/usage.h ; \
+	    cat $(srctree)/docs/busybox_footer.pod ; ) > docs/busybox.pod
 
 docs/BusyBox.txt: docs/busybox.pod
 	$(disp_doc)
 	$(Q)-mkdir -p docs
 	$(Q)-pod2text $< > $@
 
-docs/busybox.1: docs/busybox.pod
+docs/BusyBox.1: docs/busybox.pod
 	$(disp_doc)
 	$(Q)-mkdir -p docs
-	$(Q)-pod2man --center=busybox --release="version $(KERNELVERSION)" $< > $@
+	$(Q)-pod2man --center=BusyBox --release="version $(VERSION)" \
+		$< > $@
 
 docs/BusyBox.html: docs/busybox.net/BusyBox.html
 	$(disp_doc)
@@ -157,7 +138,8 @@ docs/BusyBox.html: docs/busybox.net/BusyBox.html
 
 docs/busybox.net/BusyBox.html: docs/busybox.pod
 	$(Q)-mkdir -p docs/busybox.net
-	$(Q)-pod2html --noindex $< > $@
+	$(Q)-pod2html --noindex $< > \
+	    docs/busybox.net/BusyBox.html
 	$(Q)-rm -f pod2htm*
 
 # documentation, cross-reference

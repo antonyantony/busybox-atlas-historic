@@ -490,7 +490,11 @@ config FEATURE_PERD_D
 	depends on PERD
 	default n
 	help
+<<<<<<< HEAD:miscutils/Config.src
 	 -d sets loglevel to 0 (most verbose) and directs all output to stderr.
+=======
+	  -d sets loglevel to 0 (most verbose) and directs all output to stderr.
+>>>>>>> ripe-atlas-fw-4550:miscutils/Config.in
 
 config RAIDAUTORUN
 	bool "raidautorun"

@@ -15,7 +15,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "libbb.h"
-#include "atlas_probe.h"
 
 #define SAFE_PREFIX_DATA_OUT ATLAS_DATA_OUT
 #define SAFE_PREFIX_DATA_OOQ_OUT ATLAS_DATA_OOQ_OUT
@@ -150,6 +149,15 @@ int httppost_main(int argc, char *argv[])
 		return 1;
 	}
 	url= argv[optind];
+
+	if (atlas_id)
+	{
+		if (!validate_atlas_id(atlas_id))
+		{
+			fprintf(stderr, "bad atlas ID '%s'", atlas_id);
+			return 1;
+		}
+	}
 
 	if (maxpostsizestr)
 	{

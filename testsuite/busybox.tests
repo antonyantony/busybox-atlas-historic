@@ -2,17 +2,16 @@
 
 # Tests for busybox applet itself.
 # Copyright 2005 by Rob Landley <rob@landley.net>
-# Licensed under GPLv2, see file LICENSE in this source tree.
+# Licensed under GPL v2, see file LICENSE for details.
 
-. ./testing.sh
+. testing.sh
 
-HELPDUMP=`true | busybox 2>&1 | cat`
+HELPDUMP=`busybox`
 
 # We need to test under calling the binary under other names.
 
-optional FEATURE_VERBOSE_USAGE
-testing "busybox --help busybox" "true | busybox --help busybox 2>&1 | cat" "$HELPDUMP\n\n" "" ""
-SKIP=
+
+testing "busybox --help busybox" "busybox --help busybox" "$HELPDUMP\n\n" "" ""
 
 ln -s `which busybox` busybox-suffix
 for i in busybox ./busybox-suffix
@@ -27,11 +26,11 @@ do
 
 	testing "$i --help" "$i --help 2>&1" "$HELPDUMP\n\n" "" ""
 
-	optional FEATURE_VERBOSE_USAGE CAT
+	optional CAT
 	testing "" "$i cat" "moo" "" "moo"
-	testing "$i --help cat" "$i --help cat 2>&1 | grep print" \
-		"Concatenate FILEs and print them to stdout\n" "" ""
-	SKIP=
+	testing "$i --help cat" "$i --help cat 2>&1 | grep prints" \
+		"Concatenates FILE(s) and prints them to stdout.\n" "" ""
+	optional ""
 
 	testing "$i --help unknown" "$i --help unknown 2>&1" \
 		"unknown: applet not found\n" "" ""

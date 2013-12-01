@@ -8,18 +8,21 @@
  */
 
 #include "libbb.h"
-#include "atlas_probe.h"
 #include <event2/dns.h>
 #include <event2/event.h>
 #include <event2/event_struct.h>
 
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/ip6.h>
 #include <netinet/icmp6.h>
 
 #include "eperd.h"
 
 #define SAFE_PREFIX ATLAS_DATA_NEW
+
+/* Don't report psize yet. */
+#define DO_PSIZE	0
 
 #define DBQ(str) "\"" #str "\""
 
@@ -41,7 +44,9 @@ enum
  * default data size is calculated as to be like the original
  */
 #define IPHDR              20
-#define MAX_DATA_SIZE      (4096 - IPHDR - ICMP_MINLEN)
+#define MAX_DATA_SIZE      (4096 - IPHDR)
+
+#define ICMP6_HDRSIZE (offsetof(struct icmp6_hdr, icmp6_data16[2]))
 
 /* Error codes */
 #define PING_ERR_NONE      0
@@ -110,6 +115,7 @@ struct pingstate
 	char no_dst;
 	unsigned char ttl;
 	unsigned size;
+	unsigned psize;
 
 	char *result;
 	size_t reslen;
@@ -163,13 +169,6 @@ msecstotv(time_t msecs, struct timeval *tv)
 {
 	tv->tv_sec  = msecs / 1000;
 	tv->tv_usec = msecs % 1000 * 1000;
-}
-
-/* The time since 'tv' in microseconds */
-static time_t
-tvtousecs (struct timeval *tv)
-{
-	return tv->tv_sec * 1000000.0 + tv->tv_usec;
 }
 
 static void add_str(struct pingstate *state, const char *str)
@@ -254,17 +253,22 @@ static void report(struct pingstate *state)
 		fprintf(fh, ", " DBQ(ttl) ":%d", state->ttl);
 
 	fprintf(fh, ", " DBQ(size) ":%d", state->size);
+#if DO_PSIZE
+	if (state->psize != -1)
+		fprintf(fh, ", " DBQ(psize) ":%d", state->psize);
+#endif /* DO_PSIZE */
 
 	fprintf(fh, ", \"result\": [ %s ] }\n", state->result);
 	free(state->result);
 	state->result= NULL;
+
 	state->busy= 0;
 
 	if (state->out_filename)
 		fclose(fh);
 }
 
-static void ping_cb(int result, int bytes,
+static void ping_cb(int result, int bytes, int psize,
 	struct sockaddr *sa, socklen_t socklen,
 	struct sockaddr *loc_sa, socklen_t loc_socklen,
 	int seq, int ttl,
@@ -272,8 +276,10 @@ static void ping_cb(int result, int bytes,
 {
 	struct pingstate *pingstate;
 	unsigned long usecs;
-	char namebuf[NI_MAXHOST];
+	char namebuf1[NI_MAXHOST], namebuf2[NI_MAXHOST];
 	char line[256];
+
+	(void)socklen;	/* Suppress GCC unused parameter warning */
 
 	pingstate= arg;
 
@@ -292,6 +298,7 @@ static void ping_cb(int result, int bytes,
 	if (pingstate->first)
 	{
 		pingstate->size= bytes;
+		pingstate->psize= psize;
 		pingstate->ttl= ttl;
 	}
 
@@ -330,6 +337,15 @@ static void ping_cb(int result, int bytes,
 			add_str(pingstate, line);
 			pingstate->size= bytes;
 		}
+		if (pingstate->psize != psize && psize != -1)
+		{
+#if DO_PSIZE
+			snprintf(line, sizeof(line),
+				", " DBQ(psize) ":%d", psize);
+			add_str(pingstate, line);
+#endif /* DO_PSIZE */
+			pingstate->psize= psize;
+		}
 		if (pingstate->ttl != ttl)
 		{
 			snprintf(line, sizeof(line),
@@ -337,14 +353,21 @@ static void ping_cb(int result, int bytes,
 			add_str(pingstate, line);
 			pingstate->ttl= ttl;
 		}
-		if (memcmp(&pingstate->loc_sin6, loc_sa, loc_socklen) != 0)
+		namebuf1[0]= '\0';
+		getnameinfo(&pingstate->loc_sin6, loc_socklen, namebuf1,
+			sizeof(namebuf1), NULL, 0, NI_NUMERICHOST);
+		namebuf2[0]= '\0';
+		getnameinfo(loc_sa, loc_socklen, namebuf2,
+			sizeof(namebuf2), NULL, 0, NI_NUMERICHOST);
+
+		if (strcmp(namebuf1, namebuf2) != 0)
 		{
-			namebuf[0]= '\0';
-			getnameinfo(loc_sa, loc_socklen, namebuf,
-				sizeof(namebuf), NULL, 0, NI_NUMERICHOST);
+			printf("loc_sin6: %s\n", namebuf1);
+
+			printf("loc_sa: %s\n", namebuf2);
 
 			snprintf(line, sizeof(line),
-				", " DBQ(srcaddr) ":" DBQ(%s), namebuf);
+				", " DBQ(srcaddr) ":" DBQ(%s), namebuf2);
 			add_str(pingstate, line);
 		}
 
@@ -372,14 +395,14 @@ static void ping_cb(int result, int bytes,
 	{
 		if (pingstate->first && pingstate->loc_socklen != 0)
 		{
-			namebuf[0]= '\0';
+			namebuf1[0]= '\0';
 			getnameinfo((struct sockaddr *)&pingstate->loc_sin6,
 				pingstate->loc_socklen,
-				namebuf, sizeof(namebuf),
+				namebuf1, sizeof(namebuf1),
 				NULL, 0, NI_NUMERICHOST);
 
 			snprintf(line, sizeof(line),
-				", " DBQ(srcaddr) ":" DBQ(%s), namebuf);
+				", " DBQ(srcaddr) ":" DBQ(%s), namebuf1);
 			add_str(pingstate, line);
 		}
 		add_str(pingstate, " }");
@@ -388,6 +411,7 @@ static void ping_cb(int result, int bytes,
 	if (result == PING_ERR_DNS)
 	{
 		pingstate->size= bytes;
+		pingstate->psize= psize;
 		snprintf(line, sizeof(line),
 			"%s{ " DBQ(error) ":" DBQ(dns resolution failed: %s) " }",
 			pingstate->first ? "" : ", ", (char *)sa);
@@ -455,11 +479,11 @@ static void fmticmp4(u_char *buffer, size_t *sizep, u_int8_t seq,
 
 	struct timeval now;
 
-	minlen= ICMP_MINLEN + sizeof(*data);
+	minlen= sizeof(*data);
 	if (*sizep < minlen)
 		*sizep= minlen;
-	if (*sizep > MAX_DATA_SIZE)
-		*sizep= MAX_DATA_SIZE;
+	if (*sizep > MAX_DATA_SIZE - ICMP_MINLEN)
+		*sizep= MAX_DATA_SIZE - ICMP_MINLEN;
 
 	if (*sizep > minlen)
 		memset(buffer+minlen, '\0', *sizep-minlen);
@@ -477,7 +501,7 @@ static void fmticmp4(u_char *buffer, size_t *sizep, u_int8_t seq,
 
 	/* Last, compute ICMP checksum */
 	icmp->icmp_cksum = 0;
-	icmp->icmp_cksum = mkcksum((u_short *) icmp, *sizep);  /* ones complement checksum of struct */
+	icmp->icmp_cksum = mkcksum((u_short *) icmp, ICMP_MINLEN + *sizep);  /* ones complement checksum of struct */
 }
 
 
@@ -501,15 +525,15 @@ static void fmticmp6(u_char *buffer, size_t *sizep,
 {
 	size_t minlen;
 	struct icmp6_hdr *icmp = (struct icmp6_hdr *) buffer;
-	struct evdata *data = (struct evdata *) (buffer + offsetof(struct icmp6_hdr, icmp6_data16[2]));
+	struct evdata *data = (struct evdata *) (buffer + ICMP6_HDRSIZE);
 
 	struct timeval now;
 
-	minlen= offsetof(struct icmp6_hdr, icmp6_data16[2]) + sizeof(*data);
+	minlen= sizeof(*data);
 	if (*sizep < minlen)
 		*sizep= minlen;
-	if (*sizep > MAX_DATA_SIZE)
-		*sizep= MAX_DATA_SIZE;
+	if (*sizep > MAX_DATA_SIZE - ICMP6_HDRSIZE)
+		*sizep= MAX_DATA_SIZE - ICMP6_HDRSIZE;
 
 	if (*sizep > minlen)
 		memset(buffer+minlen, '\0', *sizep-minlen);
@@ -537,19 +561,22 @@ static void ping_xmit(struct pingstate *host)
 	int nsent, fd4, fd6, t_errno, r;
 
 	host->send_error= 0;
+	host->got_reply= 0;
 	if (host->sentpkts >= host->maxpkts)
 	{
 		/* Done. */
-		ping_cb(PING_ERR_DONE, host->cursize,
+		ping_cb(PING_ERR_DONE, host->cursize, host->psize,
 			(struct sockaddr *)&host->sin6, host->socklen,
 			(struct sockaddr *)&host->loc_sin6, host->loc_socklen,
 			0, host->rcvd_ttl, NULL,
 			host);
+		if (host->dns_res)
+		{
+			evutil_freeaddrinfo(host->dns_res);
+			host->dns_res= NULL;
+		}
 		if (host->base->done)
 			host->base->done(host);
-
-		/* Fake packet sent to kill timer */
-	    	host->sentpkts++;
 
 		return;
 	}
@@ -575,7 +602,7 @@ static void ping_xmit(struct pingstate *host)
 			}
 		}
 
-		nsent = sendto(fd6, base->packet, host->cursize,
+		nsent = sendto(fd6, base->packet, host->cursize+ICMP6_HDRSIZE,
 			MSG_DONTWAIT, (struct sockaddr *)&host->sin6,
 			host->socklen);
 
@@ -604,7 +631,7 @@ static void ping_xmit(struct pingstate *host)
 		}
 
 
-		nsent = sendto(fd4, base->packet, host->cursize,
+		nsent = sendto(fd4, base->packet, host->cursize+ICMP_MINLEN,
 			MSG_DONTWAIT, (struct sockaddr *)&host->sin6,
 			host->socklen);
 
@@ -625,12 +652,16 @@ static void ping_xmit(struct pingstate *host)
 	  host->send_error= 1;
 
 	  /* Report the failure and stop */
-	  ping_cb(PING_ERR_SENDTO, host->cursize,
+	  ping_cb(PING_ERR_SENDTO, host->cursize, -1,
 			(struct sockaddr *)&host->sin6, host->socklen,
 			(struct sockaddr *)&host->loc_sin6, host->loc_socklen,
 			errno, 0, NULL,
 			host);
 	}
+
+
+	/* Add the timer to handle no reply condition in the given timeout */
+	evtimer_add(&host->ping_timer, &host->base->tv_interval);
 }
 
 
@@ -641,7 +672,7 @@ static void noreply_callback(int __attribute((unused)) unused, const short __att
 
 	if (!host->got_reply && !host->send_error)
 	{
-		ping_cb(PING_ERR_TIMEOUT, host->cursize,
+		ping_cb(PING_ERR_TIMEOUT, host->cursize, -1,
 			(struct sockaddr *)&host->sin6, host->socklen,
 			NULL, 0,
 			host->seq, -1, &host->base->tv_interval,
@@ -652,11 +683,6 @@ static void noreply_callback(int __attribute((unused)) unused, const short __att
 	}
 
 	ping_xmit(host);
-
-	if (host->sentpkts <= host->maxpkts)
-	{
-		evtimer_add(&host->ping_timer, &host->base->tv_interval);
-	}
 }
 
 /*
@@ -752,13 +778,9 @@ printf("ready_callback4: too short\n");
 	  {
 	    /* Use the User Data to relate Echo Request/Reply and evaluate the Round Trip Time */
 	    struct timeval elapsed;             /* response time */
-	    time_t usecs;
 
 	    /* Compute time difference to calculate the round trip */
 	    evutil_timersub (&now, &data->ts, &elapsed);
-
-	    /* Update counters */
-	    usecs = tvtousecs(&elapsed);
 
 	    /* Set destination address of packet as local address */
 	    sin4p= &loc_sin4;
@@ -773,7 +795,7 @@ printf("ready_callback4: too short\n");
 	     */
 	    isDup= (ntohs(icmp->un.echo.sequence) != host->seq);
 	    ping_cb(isDup ? PING_ERR_DUP : PING_ERR_NONE,
-		    nrecv - IPHDR,
+		    nrecv - IPHDR - ICMP_MINLEN, nrecv,
 		    (struct sockaddr *)&host->sin6, host->socklen,
 		    (struct sockaddr *)&loc_sin4, sizeof(loc_sin4),
 		    ntohs(icmp->un.echo.sequence), ip->ip_ttl, &elapsed,
@@ -871,13 +893,9 @@ static void ready_callback6 (int __attribute((unused)) unused,
 	  {
 	    /* Use the User Data to relate Echo Request/Reply and evaluate the Round Trip Time */
 	    struct timeval elapsed;             /* response time */
-	    time_t usecs;
 
 	    /* Compute time difference to calculate the round trip */
 	    evutil_timersub (&now, &data->ts, &elapsed);
-
-	    /* Update counters */
-	    usecs = tvtousecs(&elapsed);
 
 	    /* Set destination address of packet as local address */
 	    memset(&loc_sin6, '\0', sizeof(loc_sin6));
@@ -907,7 +925,7 @@ static void ready_callback6 (int __attribute((unused)) unused,
 	     */
 	    isDup= (ntohs(icmp->icmp6_seq) != host->seq);
 	    ping_cb(isDup ? PING_ERR_DUP : PING_ERR_NONE,
-		    nrecv - IPHDR,\
+		    nrecv - ICMP6_HDRSIZE, nrecv + sizeof(struct ip6_hdr),
 		    (struct sockaddr *)&host->sin6, host->socklen,
 		    (struct sockaddr *)&loc_sin6, sizeof(loc_sin6),
 		    ntohs(icmp->icmp6_seq), host->rcvd_ttl, &elapsed,
@@ -1039,7 +1057,7 @@ static void *ping_init(int __attribute((unused)) argc, char *argv[],
 	{
 		if (!validate_filename(out_filename, SAFE_PREFIX))
 		{
-			crondlog(LVL8 "insecure file '%s' allowed %s", out_filename, SAFE_PREFIX);
+			crondlog(LVL8 "insecure file '%s'", out_filename);
 			return NULL;
 		}
 		fh= fopen(out_filename, "a");
@@ -1050,6 +1068,15 @@ static void *ping_init(int __attribute((unused)) argc, char *argv[],
 			return NULL;
 		}
 		fclose(fh);
+	}
+
+	if (str_Atlas)
+	{
+		if (!validate_atlas_id(str_Atlas))
+		{
+			crondlog(LVL8 "bad atlas ID '%s'", str_Atlas);
+			return NULL;
+		}
 	}
 
 	af= AF_UNSPEC;
@@ -1139,9 +1166,6 @@ static void ping_start2(void *state)
 	pingstate->cursize= pingstate->maxsize;
 
 	ping_xmit(pingstate);
-
-	/* Add the timer to handle no reply condition in the given timeout */
-	evtimer_add(&pingstate->ping_timer, &pingstate->base->tv_interval);
 }
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
@@ -1165,12 +1189,12 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 
 	if (result != 0)
 	{
-		ping_cb(PING_ERR_DNS, env->maxsize,
+		ping_cb(PING_ERR_DNS, env->maxsize, -1,
 			(struct sockaddr *)evutil_gai_strerror(result), 0,
 			(struct sockaddr *)NULL, 0,
 			0, 0, NULL,
 			env);
-		ping_cb(PING_ERR_DONE, env->maxsize,
+		ping_cb(PING_ERR_DONE, env->maxsize, -1,
 			(struct sockaddr *)NULL, 0,
 			(struct sockaddr *)NULL, 0,
 			0, 0, NULL,
@@ -1206,7 +1230,7 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 	evutil_freeaddrinfo(env->dns_res);
 	env->dns_res= NULL;
 	env->dns_curr= NULL;
-	ping_cb(PING_ERR_DNS_NO_ADDR, env->cursize,
+	ping_cb(PING_ERR_DNS_NO_ADDR, env->cursize, -1,
 		(struct sockaddr *)NULL, 0,
 		(struct sockaddr *)NULL, 0,
 		0, 0, NULL,
@@ -1218,10 +1242,12 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 static void ping_start(void *state)
 {
 	struct pingstate *pingstate;
-	struct evdns_getaddrinfo_request *evdns_req;
 	struct evutil_addrinfo hints;
 
 	pingstate= state;
+
+	if (pingstate->busy)
+		return;
 
 	if (pingstate->result) free(pingstate->result);
 	pingstate->resmax= 80;
@@ -1246,10 +1272,8 @@ static void ping_start(void *state)
 	memset(&hints, '\0', sizeof(hints));
 	hints.ai_socktype= SOCK_DGRAM;
 	hints.ai_family= pingstate->af;
-	printf("hostname '%s', family %d\n",
-		pingstate->hostname, hints.ai_family);
-	evdns_req= evdns_getaddrinfo(DnsBase, pingstate->hostname,
-		NULL, &hints, dns_cb, pingstate);
+	(void) evdns_getaddrinfo(DnsBase, pingstate->hostname, NULL,
+		&hints, dns_cb, pingstate);
 }
 
 static int ping_delete(void *state)

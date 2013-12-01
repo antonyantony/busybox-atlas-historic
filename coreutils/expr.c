@@ -11,7 +11,7 @@
  *  - reduced 464 bytes.
  *  - 64 math support
  *
- * Licensed under GPLv2 or later, see file LICENSE in this source tree.
+ * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
 /* This program evaluates expressions.  Each token (operator, operand,
@@ -24,41 +24,6 @@
  * provided they all associate ((x op x) op x). */
 
 /* no getopt needed */
-
-//usage:#define expr_trivial_usage
-//usage:       "EXPRESSION"
-//usage:#define expr_full_usage "\n\n"
-//usage:       "Print the value of EXPRESSION to stdout\n"
-//usage:    "\n"
-//usage:       "EXPRESSION may be:\n"
-//usage:       "	ARG1 | ARG2	ARG1 if it is neither null nor 0, otherwise ARG2\n"
-//usage:       "	ARG1 & ARG2	ARG1 if neither argument is null or 0, otherwise 0\n"
-//usage:       "	ARG1 < ARG2	1 if ARG1 is less than ARG2, else 0. Similarly:\n"
-//usage:       "	ARG1 <= ARG2\n"
-//usage:       "	ARG1 = ARG2\n"
-//usage:       "	ARG1 != ARG2\n"
-//usage:       "	ARG1 >= ARG2\n"
-//usage:       "	ARG1 > ARG2\n"
-//usage:       "	ARG1 + ARG2	Sum of ARG1 and ARG2. Similarly:\n"
-//usage:       "	ARG1 - ARG2\n"
-//usage:       "	ARG1 * ARG2\n"
-//usage:       "	ARG1 / ARG2\n"
-//usage:       "	ARG1 % ARG2\n"
-//usage:       "	STRING : REGEXP		Anchored pattern match of REGEXP in STRING\n"
-//usage:       "	match STRING REGEXP	Same as STRING : REGEXP\n"
-//usage:       "	substr STRING POS LENGTH Substring of STRING, POS counted from 1\n"
-//usage:       "	index STRING CHARS	Index in STRING where any CHARS is found, or 0\n"
-//usage:       "	length STRING		Length of STRING\n"
-//usage:       "	quote TOKEN		Interpret TOKEN as a string, even if\n"
-//usage:       "				it is a keyword like 'match' or an\n"
-//usage:       "				operator like '/'\n"
-//usage:       "	(EXPRESSION)		Value of EXPRESSION\n"
-//usage:       "\n"
-//usage:       "Beware that many operators need to be escaped or quoted for shells.\n"
-//usage:       "Comparisons are arithmetic if both ARGs are numbers, else\n"
-//usage:       "lexicographical. Pattern matches return the string matched between\n"
-//usage:       "\\( and \\) or null; if \\( and \\) are not used, they return the number\n"
-//usage:       "of characters matched or 0."
 
 #include "libbb.h"
 #include "xregex.h"
@@ -98,9 +63,8 @@ typedef struct valinfo VALUE;
 /* The arguments given to the program, minus the program name.  */
 struct globals {
 	char **args;
-} FIX_ALIASING;
+};
 #define G (*(struct globals*)&bb_common_bufsiz1)
-#define INIT_G() do { } while (0)
 
 /* forward declarations */
 static VALUE *eval(void);
@@ -250,22 +214,22 @@ static arith_t arithmetic_common(VALUE *l, VALUE *r, int op)
 
 static VALUE *docolon(VALUE *sv, VALUE *pv)
 {
-	enum { NMATCH = 2 };
 	VALUE *v;
 	regex_t re_buffer;
+	const int NMATCH = 2;
 	regmatch_t re_regs[NMATCH];
 
 	tostring(sv);
 	tostring(pv);
 
 	if (pv->u.s[0] == '^') {
-		bb_error_msg(
-"warning: '%s': using '^' as the first character\n"
-"of a basic regular expression is not portable; it is ignored", pv->u.s);
+		bb_error_msg("\
+warning: unportable BRE: `%s': using `^' as the first character\n\
+of a basic regular expression is not portable; it is being ignored", pv->u.s);
 	}
 
 	memset(&re_buffer, 0, sizeof(re_buffer));
-	memset(re_regs, 0, sizeof(re_regs));
+	memset(re_regs, 0, sizeof(*re_regs));
 	xregcomp(&re_buffer, pv->u.s, 0);
 
 	/* expr uses an anchored pattern match, so check that there was a
@@ -274,7 +238,7 @@ static VALUE *docolon(VALUE *sv, VALUE *pv)
 	 && re_regs[0].rm_so == 0
 	) {
 		/* Were \(...\) used? */
-		if (re_buffer.re_nsub > 0 && re_regs[1].rm_so >= 0) {
+		if (re_buffer.re_nsub > 0) {
 			sv->u.s[re_regs[1].rm_eo] = '\0';
 			v = str_value(sv->u.s + re_regs[1].rm_so);
 		} else {
@@ -287,7 +251,7 @@ static VALUE *docolon(VALUE *sv, VALUE *pv)
 		else
 			v = int_value(0);
 	}
-	regfree(&re_buffer);
+//FIXME: sounds like here is a bit missing: regfree(&re_buffer);
 	return v;
 }
 
@@ -377,6 +341,7 @@ static VALUE *eval6(void)
 		freev(i2);
 	}
 	return v;
+
 }
 
 /* Handle : operator (pattern matching).
@@ -516,23 +481,24 @@ static VALUE *eval(void)
 }
 
 int expr_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-int expr_main(int argc UNUSED_PARAM, char **argv)
+int expr_main(int argc, char **argv)
 {
 	VALUE *v;
 
-	INIT_G();
-
-	xfunc_error_retval = 2; /* coreutils compat */
-	G.args = argv + 1;
-	if (*G.args == NULL) {
+	if (argc == 1) {
 		bb_error_msg_and_die("too few arguments");
 	}
+
+	G.args = argv + 1;
+
 	v = eval();
 	if (*G.args)
 		bb_error_msg_and_die("syntax error");
+
 	if (v->type == INTEGER)
 		printf("%" PF_REZ "d\n", PF_REZ_TYPE v->u.i);
 	else
 		puts(v->u.s);
+
 	fflush_stdout_and_exit(null(v));
 }
