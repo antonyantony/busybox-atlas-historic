@@ -697,7 +697,7 @@ static void report(struct hgstate *state)
 		else
 			fh= stdout;
 
-		fprintf(fh, "RESULT { ");
+		fprintf(fh, "{ ");
 		if (state->atlas)
 		{
 			fprintf(fh, DBQ(id) ":" DBQ(%s) ", "

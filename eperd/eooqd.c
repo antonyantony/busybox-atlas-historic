@@ -384,7 +384,7 @@ error:
 			crondlog(DIE9 "unable to append to '%s'",
 				OOQD_NEW_PREFIX);
 		}
-		fprintf(fn, "RESULT { ");
+		fprintf(fn, "{ ");
 		if (state->atlas_id)
 			fprintf(fn, DBQ(id) ":" DBQ(%s) ", ", state->atlas_id);
 		fprintf(fn, DBQ(fw) ":" DBQ(%d) ", " DBQ(time) ":%ld, ",
@@ -501,7 +501,7 @@ static void check_resolv_conf2(const char *out_file, const char *atlasid)
 		fn= fopen(out_file, "a");
 		if (!fn)
 			crondlog(DIE9 "unable to append to '%s'", out_file);
-		fprintf(fn, "RESULT { ");
+		fprintf(fn, "{ ");
 		if (atlasid)
 			fprintf(fn, DBQ(id) ":" DBQ(%s) ", ", atlasid);
 		fprintf(fn, DBQ(fw) ":" DBQ(%d) ", " DBQ(time) ":%ld, ",

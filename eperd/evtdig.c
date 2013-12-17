@@ -1570,7 +1570,7 @@ static void tdig_stats(int unusg_statsed UNUSED_PARAM, const short event UNUSED_
 	else
 		fh = stdout;  
 
-	fprintf(fh, "RESULT { ");
+	fprintf(fh, "{ ");
 	JS(id, "9201" ); 
 	gettimeofday(&now, NULL); 
 	JS1(time, %ld,  now.tv_sec);
@@ -1787,7 +1787,7 @@ void printErrorQuick (struct query_state *qry)
 	else
 		fh = stdout;
 
-	fprintf(fh, "RESULT { ");
+	fprintf(fh, "{ ");
 	if(qry->str_Atlas) 
 	{
 		JS(id,  qry->str_Atlas);
@@ -1832,7 +1832,7 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result )
 	else
 		fh = stdout;
 
-	fprintf(fh, "RESULT { ");
+	fprintf(fh, "{ ");
 	if(qry->str_Atlas) 
 	{
 		JS(id,  qry->str_Atlas);

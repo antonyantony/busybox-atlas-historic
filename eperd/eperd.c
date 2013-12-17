@@ -514,7 +514,7 @@ static void check_resolv_conf(void)
 		fn= fopen(out_filename, "a");
 		if (!fn)
 			crondlog(DIE9 "unable to append to '%s'", out_filename);
-		fprintf(fn, "RESULT { ");
+		fprintf(fn, "{ ");
 		if (atlas_id)
 			fprintf(fn, DBQ(id) ":" DBQ(%s) ", ", atlas_id);
 		fprintf(fn, DBQ(fw) ":" DBQ(%d) ", " DBQ(time) ":%ld, ",
@@ -895,7 +895,7 @@ error:
 		fn= fopen(out_filename, "a");
 		if (!fn)
 			crondlog(DIE9 "unable to append to '%s'", out_filename);
-		fprintf(fn, "RESULT { ");
+		fprintf(fn, "{ ");
 		if (atlas_id)
 			fprintf(fn, DBQ(id) ":" DBQ(%s) ", ", atlas_id);
 		fprintf(fn, DBQ(fw) ":" DBQ(%d) ", " DBQ(time) ":%ld, ",
