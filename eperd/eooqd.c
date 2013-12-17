@@ -102,7 +102,7 @@ int eooqd_main(int argc, char *argv[])
 	state->atlas_id= atlas_id;
 	state->queue_file= argv[optind];
 
-	state->max_busy= 50;
+	state->max_busy= CONFIG_FEATURE_EOOQD_MAX_BUSY;
 
 	state->slots= xzalloc(sizeof(*state->slots) * state->max_busy);
 
@@ -362,7 +362,8 @@ static void add_line(void)
 		crondlog(LVL7 "atlas_run: argv[%d] = '%s'", i, argv[i]);
 
 	cmdstate= bp->testops->init(argc, argv, cmddone);
-	crondlog(LVL7 "init returned %p for '%s'", cmdstate, cmdline);
+	crondlog(LVL7 "init returned %p for '%s' busy %d/%d", 
+cmdstate, cmdline, state->curr_busy , state->max_busy);
 
 	if (cmdstate != NULL)
 	{

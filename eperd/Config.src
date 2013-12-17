@@ -15,6 +15,14 @@ config EOOQD
 	help
 	    Eooqd runs Atlas measurements just once.
 
+config FEATURE_EOOQD_MAX_BUSY
+	int "EOOQD active Q size"
+	range 1 65535
+	default 50
+	depends on EOOQD
+	help
+	  Location of eperd spool.
+
 config EPERD
 	bool "Eperd"
 	default n

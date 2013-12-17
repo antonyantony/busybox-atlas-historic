@@ -974,7 +974,7 @@ static int eat_certificate(struct state *state)
 		else
 			fh= stdout;
 
-		fprintf(fh, "RESULT { ");
+		fprintf(fh, "{ ");
 		if (state->atlas)
 		{
 			fprintf(fh, DBQ(id) ":" DBQ(%s)
