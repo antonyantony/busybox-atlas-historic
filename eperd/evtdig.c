@@ -1353,6 +1353,7 @@ struct tdig_base * tdig_base_new(struct event_base *event_base)
 	/* Create an endpoint for communication using raw socket for ICMP calls */
 	if ((fd4 = socket(hints.ai_family, hints.ai_socktype, hints.ai_protocol) ) < 0 )
 	{
+		crondlog(LVL8 "ERROR: could not open an IPv4 socket\n");
 		return NULL;
 	} 
 
@@ -1360,12 +1361,14 @@ struct tdig_base * tdig_base_new(struct event_base *event_base)
 	if ((fd6 = socket(hints.ai_family, hints.ai_socktype, hints.ai_protocol) ) < 0 )
 	{
 		close(fd4);
+		crondlog(LVL8 "ERROR: could not open an IPv6 socket\n");
 		return NULL;
 	} 
 
 	tdig_base= xzalloc(sizeof( struct tdig_base));
 	if (tdig_base == NULL)
 	{
+		crondlog(LVL8 "ERROR: xzalloc failured for tdig_base");
 		close(fd4);
 		close(fd6);
 		return (NULL);

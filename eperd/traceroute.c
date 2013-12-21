@@ -455,7 +455,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "socket failed");
+				crondlog(DIE9 "IPv6 socket failed");
 			}
 
 			on= 1;
@@ -661,7 +661,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET6, SOCK_DGRAM, 0);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "socket failed");
+				crondlog(DIE9 "IPv6 socket failed");
 			}
 
 			on= 1;
@@ -776,7 +776,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "socket failed");
+				crondlog(DIE9 "IPV4 socket failed");
 			}
 
 			on= 1;
@@ -995,7 +995,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET, SOCK_DGRAM, 0);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "socket failed");
+				crondlog(DIE9 "IPv4 socket failed");
 			}
 
 			on= 1;
@@ -3505,7 +3505,7 @@ static void traceroute_start2(void *state)
 			sock= socket(AF_INET6, SOCK_DGRAM, 0);
                         if (sock == -1)
                         {
-                                crondlog(DIE9 "socket failed");
+                                crondlog(DIE9 "IPv6 socket failed");
                         }
 			r= bind(sock, (struct sockaddr *)&loc_sa6,
 				sizeof(loc_sa6));
@@ -3577,7 +3577,7 @@ static void traceroute_start2(void *state)
 			sock= socket(AF_INET, SOCK_DGRAM, 0);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "socket failed");
+				crondlog(DIE9 "IPv4 socket failed");
 			}
 			r= bind(sock, (struct sockaddr *)&loc_sa4,
 				sizeof(loc_sa4));
