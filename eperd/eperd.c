@@ -32,17 +32,8 @@
 
 #define DBQ(str) "\"" #str "\""
 
-#ifndef CRONTABS
-#define CRONTABS        "/var/spool/cron/crontabs"
-#endif
-#ifndef TMPDIR
-#define TMPDIR          "/var/spool/cron"
-#endif
 #ifndef CRONUPDATE
 #define CRONUPDATE      "cron.update"
-#endif
-#ifndef MAXLINES
-#define MAXLINES        256	/* max lines in non-root crontabs */
 #endif
 
 #define URANDOM_DEV	"/dev/urandom"
@@ -95,7 +86,7 @@ enum {
 struct globals G;
 #define INIT_G() do { \
 	LogLevel = 8; \
-	CDir = CRONTABS; \
+	CDir = CONFIG_FEATURE_EPERD_CRONS_DIR; \
 } while (0)
 
 static int do_kick_watchdog;
@@ -393,7 +384,7 @@ static void SynchronizeFile(const char *fileName)
 		return;
 	}
 
-	maxLines = (strcmp(fileName, "root") == 0) ? 65535 : MAXLINES;
+	maxLines = CONFIG_FEATURE_EPERD_MAX_LINES;
 
 	if (fstat(fileno(parser->fp), &sbuf) == 0 /* && sbuf.st_uid == DaemonUid */) {
 		int n;

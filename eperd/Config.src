@@ -31,6 +31,15 @@ config EPERD
 	help
 	    Eperd periodically runs Atlas measurements. It is based on crond.
 
+config FEATURE_EPERD_MAX_LINES
+	int "EPERD maximum number of lines 2^32 - 1"
+	range 1 2097152
+	default 1000000
+	depends on EPERD
+	help
+		Maximum number of lines eperd will read. The rest will 
+		be ignored. 
+
 config FEATURE_EPERD_CRONS_DIR
 	string "eperd commands directory. commands in file root"
 	default "/var/lib/eperd/crons"

@@ -1297,9 +1297,9 @@ static void *tdig_init(int argc, char *argv[], void (*done)(void *state))
 	}
 
 	if (qry->out_filename &&
-		!validate_filename(qry->out_filename, ATLAS_DATA_OUT))
+		!validate_filename(qry->out_filename, ATLAS_DATA_NEW))
 	{
-		crondlog(LVL8 "insecure file '%s' allowed %s", qry->out_filename, ATLAS_DATA_OUT);
+		crondlog(LVL8 "insecure output file file '%s' allowed %s", qry->out_filename, ATLAS_DATA_NEW);
 		tdig_delete(qry);
 		return NULL;
 	}
