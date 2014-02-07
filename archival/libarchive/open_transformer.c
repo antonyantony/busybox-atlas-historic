@@ -118,7 +118,7 @@ void FAST_FUNC open_transformer(int fd, const char *transform_prog)
 /* Used by e.g. rpm which gives us a fd without filename,
  * thus we can't guess the format from filename's extension.
  */
-int FAST_FUNC setup_unzip_on_fd(int fd, int fail_if_not_detected)
+int FAST_FUNC setup_unzip_on_fd(int fd, int fail_if_not_compressed)
 {
 	union {
 		uint8_t b[4];
@@ -159,7 +159,7 @@ int FAST_FUNC setup_unzip_on_fd(int fd, int fail_if_not_detected)
 	}
 
 	/* No known magic seen */
-	if (fail_if_not_detected)
+	if (fail_if_not_compressed)
 		bb_error_msg_and_die("no gzip"
 			IF_FEATURE_SEAMLESS_BZ2("/bzip2")
 			IF_FEATURE_SEAMLESS_XZ("/xz")
@@ -180,28 +180,27 @@ int FAST_FUNC setup_unzip_on_fd(int fd, int fail_if_not_detected)
 	return 0;
 }
 
-int FAST_FUNC open_zipped(const char *fname)
+int FAST_FUNC open_zipped(const char *fname, int fail_if_not_compressed)
 {
-	char *sfx;
 	int fd;
 
 	fd = open(fname, O_RDONLY);
 	if (fd < 0)
 		return fd;
 
-	sfx = strrchr(fname, '.');
-	if (sfx) {
-		sfx++;
-		if (ENABLE_FEATURE_SEAMLESS_LZMA && strcmp(sfx, "lzma") == 0)
-			/* .lzma has no header/signature, just trust it */
+	if (ENABLE_FEATURE_SEAMLESS_LZMA) {
+		/* .lzma has no header/signature, can only detect it by extension */
+		char *sfx = strrchr(fname, '.');
+		if (sfx && strcmp(sfx+1, "lzma") == 0) {
 			open_transformer_with_sig(fd, unpack_lzma_stream, "unlzma");
-		else
-		if ((ENABLE_FEATURE_SEAMLESS_GZ && strcmp(sfx, "gz") == 0)
-		 || (ENABLE_FEATURE_SEAMLESS_BZ2 && strcmp(sfx, "bz2") == 0)
-		 || (ENABLE_FEATURE_SEAMLESS_XZ && strcmp(sfx, "xz") == 0)
-		) {
-			setup_unzip_on_fd(fd, /*fail_if_not_detected:*/ 1);
+			return fd;
 		}
+	}
+	if ((ENABLE_FEATURE_SEAMLESS_GZ)
+	 || (ENABLE_FEATURE_SEAMLESS_BZ2)
+	 || (ENABLE_FEATURE_SEAMLESS_XZ)
+	) {
+		setup_unzip_on_fd(fd, fail_if_not_compressed);
 	}
 
 	return fd;
@@ -214,7 +213,7 @@ void* FAST_FUNC xmalloc_open_zipped_read_close(const char *fname, size_t *maxsz_
 	int fd;
 	char *image;
 
-	fd = open_zipped(fname);
+	fd = open_zipped(fname, /*fail_if_not_compressed:*/ 0);
 	if (fd < 0)
 		return NULL;
 
