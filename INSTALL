@@ -9,11 +9,11 @@ The BusyBox build process is similar to the Linux kernel build:
   cd ../
   make 		     # This creates the "busybox" executable
   make install       # installs to /usr/local/atlas/bb-13.3/
-  mkdir -p /home/atlas/crons/7 /home/atlas/data/new
-  cp examples/cron.root.7  /home/atlas/crons/7/root
-  /usr/local/atlas/bb-13.3/usr/sbin/eperd -c /home/atlas/crons/7 -A 19807 -P /home/atlas/status/perd-7.pid.vol -O /home/atlas/data/new/7 # it is ok to see output "eperd: in my_exit (exit was called!) Aborted
-  # your output is appended to file /home/atlas/data/new/7. 
-  tail -f /home/atlas/data/new/7
+  mkdir -p /var/lib/eperd/crons/7 /var/lib/eperd/out /var/lib/eperd/new
+  cp examples/cron.root.7  /var/lib/eperd/crons/7/root 
+    ./_install/usr/sbin/eperd  -c /var/lib/eperd/crons/7  -A 19807 -P /home/atlas/status/perd-7.pid.vol -O //var/lib/eperd/new/7 # it is ok to see output "eperd: in my_exit (exit was called!) Aborted
+  # your output is appended to file /var/lib/eperd/new
+  tail -f /var/lib/eperd/new/7
 
 The full list of configuration and install options is available by typing:
 
