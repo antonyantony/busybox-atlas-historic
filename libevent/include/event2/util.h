@@ -577,6 +577,9 @@ struct evutil_addrinfo {
 #else
 #define EVUTIL_EAI_FAIL -904
 #endif
+#define EVUTIL_EAI_FAIL_1 -921
+#define EVUTIL_EAI_FAIL_2 -922
+#define EVUTIL_EAI_FAIL_3 -923
 #if defined(EAI_FAMILY) && defined(EVENT__HAVE_GETADDRINFO)
 #define EVUTIL_EAI_FAMILY EAI_FAMILY
 #else

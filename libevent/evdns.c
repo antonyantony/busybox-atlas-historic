@@ -4127,6 +4127,18 @@ evdns_base_load_hosts_impl(struct evdns_base *base, const char *hosts_fname)
 
 	ASSERT_LOCKED(base);
 
+	{
+		struct hosts_entry *victim;
+		while ((victim =
+					TAILQ_FIRST(&base->hostsdb)))
+		{
+			TAILQ_REMOVE(&base->hostsdb,
+					victim,
+					next);
+			mm_free(victim);
+		}
+	}
+
 	if (hosts_fname == NULL ||
 	    (err = evutil_read_file_(hosts_fname, &str, &len, 0)) < 0) {
 		char tmp[64];
@@ -4221,7 +4233,7 @@ evdns_err_to_getaddrinfo_err(int e1)
 	else if (e1 == DNS_ERR_NOTEXIST)
 		return EVUTIL_EAI_NONAME;
 	else
-		return EVUTIL_EAI_FAIL;
+		return EVUTIL_EAI_FAIL_1;
 }
 
 /* Return the more informative of two getaddrinfo errors. */
@@ -4583,7 +4595,7 @@ evdns_getaddrinfo(struct evdns_base *dns_base,
 			log(EVDNS_LOG_WARN,
 			    "Call to getaddrinfo_async with no "
 			    "evdns_base configured.");
-			cb(EVUTIL_EAI_FAIL, NULL, arg); /* ??? better error? */
+			cb(EVUTIL_EAI_FAIL_2, NULL, arg); /* ??? better error? */
 			return NULL;
 		}
 	}
@@ -4684,7 +4696,7 @@ evdns_getaddrinfo(struct evdns_base *dns_base,
 		return data;
 	} else {
 		mm_free(data);
-		cb(EVUTIL_EAI_FAIL, NULL, arg);
+		cb(EVUTIL_EAI_FAIL_3, NULL, arg);
 		return NULL;
 	}
 }
