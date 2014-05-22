@@ -979,6 +979,10 @@ static int udhcp_raw_socket(int ifindex)
 	log1("Opening raw socket on ifindex %d", ifindex); //log2?
 
 	fd = xsocket(PF_PACKET, SOCK_DGRAM, htons(ETH_P_IP));
+	/* ^^^^^
+	 * SOCK_DGRAM: remove link-layer headers on input (SOCK_RAW keeps them)
+	 * ETH_P_IP: want to receive only packets with IPv4 eth type
+	 */
 	log1("Got raw socket fd"); //log2?
 
 	sock.sll_family = AF_PACKET;
@@ -1005,8 +1009,6 @@ static int udhcp_raw_socket(int ifindex)
 		 *
 		 * Copyright: 2006, 2007 Stefan Rompf <sux@loplof.de>.
 		 * License: GPL v2.
-		 *
-		 * TODO: make conditional?
 		 */
 		static const struct sock_filter filter_instr[] = {
 			/* load 9th byte (protocol) */
@@ -1023,9 +1025,10 @@ static int udhcp_raw_socket(int ifindex)
 			BPF_STMT(BPF_LD|BPF_H|BPF_IND, 2),
 			/* jump to L3 if udp dport is CLIENT_PORT, else to L4 */
 			BPF_JUMP(BPF_JMP|BPF_JEQ|BPF_K, 68, 0, 1),
-			/* L3: accept packet */
-			BPF_STMT(BPF_RET|BPF_K, 0xffffffff),
-			/* L4: discard packet */
+			/* L3: accept packet ("accept 0x7fffffff bytes") */
+			/* Accepting 0xffffffff works too but kernel 2.6.19 is buggy */
+			BPF_STMT(BPF_RET|BPF_K, 0x7fffffff),
+			/* L4: discard packet ("accept zero bytes") */
 			BPF_STMT(BPF_RET|BPF_K, 0),
 		};
 		static const struct sock_fprog filter_prog = {
@@ -1229,7 +1232,7 @@ static void client_background(void)
 int udhcpc_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int udhcpc_main(int argc UNUSED_PARAM, char **argv)
 {
-	uint8_t *temp, *message;
+	uint8_t *message;
 	const char *str_V, *str_h, *str_F, *str_r;
 	IF_FEATURE_UDHCP_PORT(char *str_P;)
 	void *clientid_mac_ptr;
@@ -1637,6 +1640,8 @@ int udhcpc_main(int argc UNUSED_PARAM, char **argv)
 		case INIT_SELECTING:
 			/* Must be a DHCPOFFER */
 			if (*message == DHCPOFFER) {
+				uint8_t *temp;
+
 /* What exactly is server's IP? There are several values.
  * Example DHCP offer captured with tchdump:
  *
@@ -1686,6 +1691,7 @@ int udhcpc_main(int argc UNUSED_PARAM, char **argv)
 			if (*message == DHCPACK) {
 				uint32_t lease_seconds;
 				struct in_addr temp_addr;
+				uint8_t *temp;
 
 				temp = udhcp_get_option(&packet, DHCP_LEASE_TIME);
 				if (!temp) {
@@ -1763,6 +1769,26 @@ int udhcpc_main(int argc UNUSED_PARAM, char **argv)
 				continue; /* back to main loop */
 			}
 			if (*message == DHCPNAK) {
+				/* If network has more than one DHCP server,
+				 * "wrong" server can reply first, with a NAK.
+				 * Do not interpret it as a NAK from "our" server.
+				 */
+				if (server_addr != 0) {
+					uint32_t svid;
+					uint8_t *temp;
+
+					temp = udhcp_get_option(&packet, DHCP_SERVER_ID);
+					if (!temp) {
+ non_matching_svid:
+						log1("%s with wrong server ID, ignoring packet",
+							"Received DHCP NAK"
+						);
+						continue;
+					}
+					move_from_unaligned32(svid, temp);
+					if (svid != server_addr)
+						goto non_matching_svid;
+				}
 				/* return to init state */
 				bb_info_msg("Received DHCP NAK");
 				udhcp_run_script(&packet, "nak");
