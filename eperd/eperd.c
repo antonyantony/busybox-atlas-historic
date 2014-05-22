@@ -240,10 +240,10 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 			IF_FEATURE_EPERD_D(,&LogLevel), &out_filename);
 	/* both -d N and -l N set the same variable: LogLevel */
 
-	if (out_filename && !validate_filename(out_filename, ATLAS_DATA_OUT))
+	if (out_filename && !validate_filename(out_filename, ATLAS_DATA_NEW))
 	{
 		crondlog(DIE9 "insecure file '%s'. allowed path '%s'", 
-				out_filename, ATLAS_DATA_OUT);
+				out_filename, ATLAS_DATA_NEW);
 	}
 
 	if (!(opt & OPT_f)) {
