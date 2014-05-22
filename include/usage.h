@@ -243,12 +243,6 @@
      "\n	-v	Verbose" \
      "\n	-F	Don't store or verify checksum" \
 
-#define rpm2cpio_trivial_usage \
-       "package.rpm" \
-
-#define rpm2cpio_full_usage "\n\n" \
-       "Output a cpio archive of the rpm file" \
-
 #define rpm_trivial_usage \
        "-i PACKAGE.rpm; rpm -qp[ildc] PACKAGE.rpm" \
 
@@ -261,6 +255,12 @@
      "\n	-qpl	List contents" \
      "\n	-qpd	List documents" \
      "\n	-qpc	List config files" \
+
+#define rpm2cpio_trivial_usage \
+       "package.rpm" \
+
+#define rpm2cpio_full_usage "\n\n" \
+       "Output a cpio archive of the rpm file" \
 
 #define tar_trivial_usage \
 	"-[" IF_FEATURE_TAR_CREATE("c") "xt" \
@@ -1249,16 +1249,6 @@
 #define nohup_example_usage \
        "$ nohup make &" \
 
-#if ENABLE_DESKTOP \
-
-#define od_trivial_usage \
-       "[-abcdfhilovxs] [-t TYPE] [-A RADIX] [-N SIZE] [-j SKIP] [-S MINSTR] [-w WIDTH] [FILE]..." \
-
-#define od_full_usage "\n\n" \
-       "Print FILEs (or stdin) unambiguously, as octal bytes by default" \
-
-#endif \
-
 #if !ENABLE_DESKTOP \
 
 #define od_trivial_usage \
@@ -1266,6 +1256,16 @@
 
 #define od_full_usage "\n\n" \
        "Print FILE (or stdin) unambiguously, as octal bytes by default" \
+
+#endif \
+
+#if ENABLE_DESKTOP \
+
+#define od_trivial_usage \
+       "[-abcdfhilovxs] [-t TYPE] [-A RADIX] [-N SIZE] [-j SKIP] [-S MINSTR] [-w WIDTH] [FILE]..." \
+
+#define od_full_usage "\n\n" \
+       "Print FILEs (or stdin) unambiguously, as octal bytes by default" \
 
 #endif \
 
@@ -1349,6 +1349,17 @@
        "FIRST, INC default to 1.\n" \
      "\n	-w	Pad to last with leading zeros" \
      "\n	-s SEP	String separator" \
+
+#define shuf_trivial_usage \
+       "[-e|-i L-H] [-n NUM] [-o FILE] [-z] [FILE|ARG...]" \
+
+#define shuf_full_usage "\n\n" \
+       "Randomly permute lines\n" \
+     "\n	-e	Treat ARGs as lines" \
+     "\n	-i L-H	Treat numbers L-H as lines" \
+     "\n	-n NUM	Output at most NUM lines" \
+     "\n	-o FILE	Write to FILE, not standard output" \
+     "\n	-z	End lines with zero byte, not newline" \
 
 #define sleep_trivial_usage \
 	IF_FEATURE_FANCY_SLEEP("[") "N" IF_FEATURE_FANCY_SLEEP("]...") \
@@ -1730,12 +1741,6 @@
        "$ wc /etc/passwd\n" \
        "     31      46    1365 /etc/passwd\n" \
 
-#define whoami_trivial_usage \
-       "" \
-
-#define whoami_full_usage "\n\n" \
-       "Print the user name associated with the current effective user id" \
-
 #define users_trivial_usage \
        "" \
 
@@ -1749,6 +1754,12 @@
        "Show who is logged on\n" \
      "\n	-a	Show all" \
      "\n	-H	Print column headers" \
+
+#define whoami_trivial_usage \
+       "" \
+
+#define whoami_full_usage "\n\n" \
+       "Print the user name associated with the current effective user id" \
 
 #define yes_trivial_usage \
        "[STRING]" \
@@ -2415,14 +2426,6 @@
 #define parse_full_usage "\n\n" \
        "	-x	Suppress output (for benchmarking)" \
 
-#define addgroup_trivial_usage \
-       "[-g GID] " IF_FEATURE_ADDUSER_TO_GROUP("[USER] ") "GROUP" \
-
-#define addgroup_full_usage "\n\n" \
-       "Add a group " IF_FEATURE_ADDUSER_TO_GROUP("or add a user to a group") "\n" \
-     "\n	-g GID	Group id" \
-     "\n	-S	Create a system group" \
-
 #define add_shell_trivial_usage \
        "SHELL..." \
 
@@ -2434,6 +2437,14 @@
 
 #define remove_shell_full_usage "\n\n" \
        "Remove SHELLs from /etc/shells" \
+
+#define addgroup_trivial_usage \
+       "[-g GID] " IF_FEATURE_ADDUSER_TO_GROUP("[USER] ") "GROUP" \
+
+#define addgroup_full_usage "\n\n" \
+       "Add a group " IF_FEATURE_ADDUSER_TO_GROUP("or add a user to a group") "\n" \
+     "\n	-g GID	Group id" \
+     "\n	-S	Create a system group" \
 
 #define adduser_trivial_usage \
        "[OPTIONS] USER [GROUP]" \
@@ -2817,13 +2828,6 @@
      "\n	-f	Control pipe (else exit after drawing image)" \
      "\n			commands: 'NN' (% for progress bar) or 'exit'" \
 
-#define flashcp_trivial_usage \
-       "-v FILE MTD_DEVICE" \
-
-#define flashcp_full_usage "\n\n" \
-       "Copy an image to MTD device\n" \
-     "\n	-v	Verbose" \
-
 #define flash_eraseall_trivial_usage \
        "[-jNq] MTD_DEVICE" \
 
@@ -2845,6 +2849,13 @@
 
 #define flash_unlock_full_usage "\n\n" \
        "Unlock an MTD device" \
+
+#define flashcp_trivial_usage \
+       "-v FILE MTD_DEVICE" \
+
+#define flashcp_full_usage "\n\n" \
+       "Copy an image to MTD device\n" \
+     "\n	-v	Verbose" \
 
 #define hdparm_trivial_usage \
        "[OPTIONS] [DEVICE]" \
@@ -3360,6 +3371,62 @@
 #define modinfo_example_usage \
        "$ modinfo -F vermagic loop\n" \
 
+#if ENABLE_MODPROBE_SMALL \
+
+#define depmod_trivial_usage NOUSAGE_STR \
+
+#define depmod_full_usage "" \
+
+#define lsmod_trivial_usage \
+       "" \
+
+#define lsmod_full_usage "\n\n" \
+       "List the currently loaded kernel modules" \
+
+#define insmod_trivial_usage \
+	IF_FEATURE_2_4_MODULES("[OPTIONS] MODULE ") \
+	IF_NOT_FEATURE_2_4_MODULES("FILE ") \
+	"[SYMBOL=VALUE]..." \
+
+#define insmod_full_usage "\n\n" \
+       "Load the specified kernel modules into the kernel" \
+	IF_FEATURE_2_4_MODULES( "\n" \
+     "\n	-f	Force module to load into the wrong kernel version" \
+     "\n	-k	Make module autoclean-able" \
+     "\n	-v	Verbose" \
+     "\n	-q	Quiet" \
+     "\n	-L	Lock: prevent simultaneous loads" \
+	IF_FEATURE_INSMOD_LOAD_MAP( \
+     "\n	-m	Output load map to stdout" \
+	) \
+     "\n	-x	Don't export externs" \
+	) \
+
+#define rmmod_trivial_usage \
+       "[-wfa] [MODULE]..." \
+
+#define rmmod_full_usage "\n\n" \
+       "Unload kernel modules\n" \
+     "\n	-w	Wait until the module is no longer used" \
+     "\n	-f	Force unload" \
+     "\n	-a	Remove all unused modules (recursively)" \
+
+#define rmmod_example_usage \
+       "$ rmmod tulip\n" \
+
+#define modprobe_trivial_usage \
+	"[-qfwrsv] MODULE [symbol=value]..." \
+
+#define modprobe_full_usage "\n\n" \
+       "	-r	Remove MODULE (stacks) or do autoclean" \
+     "\n	-q	Quiet" \
+     "\n	-v	Verbose" \
+     "\n	-f	Force" \
+     "\n	-w	Wait for unload" \
+     "\n	-s	Report via syslog instead of stderr" \
+
+#endif \
+
 #if !ENABLE_MODPROBE_SMALL \
 
 #define modprobe_notes_usage \
@@ -3440,62 +3507,6 @@
 	) \
 
 #endif /* !ENABLE_MODPROBE_SMALL */ \
-
-#if ENABLE_MODPROBE_SMALL \
-
-#define depmod_trivial_usage NOUSAGE_STR \
-
-#define depmod_full_usage "" \
-
-#define lsmod_trivial_usage \
-       "" \
-
-#define lsmod_full_usage "\n\n" \
-       "List the currently loaded kernel modules" \
-
-#define insmod_trivial_usage \
-	IF_FEATURE_2_4_MODULES("[OPTIONS] MODULE ") \
-	IF_NOT_FEATURE_2_4_MODULES("FILE ") \
-	"[SYMBOL=VALUE]..." \
-
-#define insmod_full_usage "\n\n" \
-       "Load the specified kernel modules into the kernel" \
-	IF_FEATURE_2_4_MODULES( "\n" \
-     "\n	-f	Force module to load into the wrong kernel version" \
-     "\n	-k	Make module autoclean-able" \
-     "\n	-v	Verbose" \
-     "\n	-q	Quiet" \
-     "\n	-L	Lock: prevent simultaneous loads" \
-	IF_FEATURE_INSMOD_LOAD_MAP( \
-     "\n	-m	Output load map to stdout" \
-	) \
-     "\n	-x	Don't export externs" \
-	) \
-
-#define rmmod_trivial_usage \
-       "[-wfa] [MODULE]..." \
-
-#define rmmod_full_usage "\n\n" \
-       "Unload kernel modules\n" \
-     "\n	-w	Wait until the module is no longer used" \
-     "\n	-f	Force unload" \
-     "\n	-a	Remove all unused modules (recursively)" \
-
-#define rmmod_example_usage \
-       "$ rmmod tulip\n" \
-
-#define modprobe_trivial_usage \
-	"[-qfwrsv] MODULE [symbol=value]..." \
-
-#define modprobe_full_usage "\n\n" \
-       "	-r	Remove MODULE (stacks) or do autoclean" \
-     "\n	-q	Quiet" \
-     "\n	-v	Verbose" \
-     "\n	-f	Force" \
-     "\n	-w	Wait for unload" \
-     "\n	-s	Report via syslog instead of stderr" \
-
-#endif \
 
 #if !ENABLE_MODPROBE_SMALL \
 
@@ -3961,36 +3972,6 @@
 #define nbdclient_full_usage "\n\n" \
        "Connect to HOST and provide a network block device on BLOCKDEV" \
 
-#if ENABLE_NC_110_COMPAT \
-
-#define nc_trivial_usage \
-       "[OPTIONS] HOST PORT  - connect" \
-	IF_NC_SERVER("\n" \
-       "nc [OPTIONS] -l -p PORT [HOST] [PORT]  - listen" \
-	) \
-
-#define nc_full_usage "\n\n" \
-       "	-e PROG	Run PROG after connect (must be last)" \
-	IF_NC_SERVER( \
-     "\n	-l	Listen mode, for inbound connects" \
-     "\n	-lk	With -e, provides persistent server" \
-	) \
-     "\n	-p PORT	Local port" \
-     "\n	-s ADDR	Local address" \
-     "\n	-w SEC	Timeout for connects and final net reads" \
-	IF_NC_EXTRA( \
-     "\n	-i SEC	Delay interval for lines sent" /* ", ports scanned" */ \
-	) \
-     "\n	-n	Don't do DNS resolution" \
-     "\n	-u	UDP mode" \
-     "\n	-v	Verbose" \
-	IF_NC_EXTRA( \
-     "\n	-o FILE	Hex dump traffic" \
-     "\n	-z	Zero-I/O mode (scanning)" \
-	) \
-
-#endif \
-
 #if !ENABLE_NC_110_COMPAT \
 
 #if ENABLE_NC_SERVER || ENABLE_NC_EXTRA \
@@ -4040,6 +4021,36 @@
        "214     NOOP QUIT RSET HELP\n" \
        "quit\n" \
        "221 foobar closing connection\n" \
+
+#endif \
+
+#if ENABLE_NC_110_COMPAT \
+
+#define nc_trivial_usage \
+       "[OPTIONS] HOST PORT  - connect" \
+	IF_NC_SERVER("\n" \
+       "nc [OPTIONS] -l -p PORT [HOST] [PORT]  - listen" \
+	) \
+
+#define nc_full_usage "\n\n" \
+       "	-e PROG	Run PROG after connect (must be last)" \
+	IF_NC_SERVER( \
+     "\n	-l	Listen mode, for inbound connects" \
+     "\n	-lk	With -e, provides persistent server" \
+	) \
+     "\n	-p PORT	Local port" \
+     "\n	-s ADDR	Local address" \
+     "\n	-w SEC	Timeout for connects and final net reads" \
+	IF_NC_EXTRA( \
+     "\n	-i SEC	Delay interval for lines sent" /* ", ports scanned" */ \
+	) \
+     "\n	-n	Don't do DNS resolution" \
+     "\n	-u	UDP mode" \
+     "\n	-v	Verbose" \
+	IF_NC_EXTRA( \
+     "\n	-o FILE	Hex dump traffic" \
+     "\n	-z	Zero-I/O mode (scanning)" \
+	) \
 
 #endif \
 
@@ -4275,27 +4286,6 @@
        "Connect to telnet server" \
 
 #endif \
-
-#define telnetd_trivial_usage \
-       "[OPTIONS]" \
-
-#define telnetd_full_usage "\n\n" \
-       "Handle incoming telnet connections" \
-	IF_NOT_FEATURE_TELNETD_STANDALONE(" via inetd") "\n" \
-     "\n	-l LOGIN	Exec LOGIN on connect" \
-     "\n	-f ISSUE_FILE	Display ISSUE_FILE instead of /etc/issue" \
-     "\n	-K		Close connection as soon as login exits" \
-     "\n			(normally wait until all programs close slave pty)" \
-	IF_FEATURE_TELNETD_STANDALONE( \
-     "\n	-p PORT		Port to listen on" \
-     "\n	-b ADDR[:PORT]	Address to bind to" \
-     "\n	-F		Run in foreground" \
-     "\n	-i		Inetd mode" \
-	IF_FEATURE_TELNETD_INETD_WAIT( \
-     "\n	-w SEC		Inetd 'wait' mode, linger time SEC" \
-     "\n	-S		Log to syslog (implied by -i or without -F and -w)" \
-	) \
-	) \
 
 #define tftp_trivial_usage \
        "[OPTIONS] HOST [PORT]" \
