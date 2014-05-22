@@ -2227,6 +2227,9 @@
      "\n	-e[STR]	STR stops input processing" \
      "\n	-n N	Pass no more than N args to PROG" \
      "\n	-s N	Pass command line of no more than N bytes" \
+	IF_FEATURE_XARGS_SUPPORT_REPL_STR( \
+     "\n	-I STR	Replace STR within PROG ARGS with input line" \
+	) \
 	IF_FEATURE_XARGS_SUPPORT_TERMOPT( \
      "\n	-x	Exit if size is exceeded" \
 	) \
@@ -2665,12 +2668,12 @@
        "[-q] [-o OFF] [-f FREQ] [-p TCONST] [-t TICK]" \
 
 #define adjtimex_full_usage "\n\n" \
-       "Read and optionally set system timebase parameters. See adjtimex(2)\n" \
+       "Read or set kernel time variables. See adjtimex(2)\n" \
      "\n	-q	Quiet" \
      "\n	-o OFF	Time offset, microseconds" \
      "\n	-f FREQ	Frequency adjust, integer kernel units (65536 is 1ppm)" \
-     "\n		(positive values make clock run faster)" \
      "\n	-t TICK	Microseconds per tick, usually 10000" \
+     "\n		(positive -t or -f values make clock run faster)" \
      "\n	-p TCONST" \
 
 #define bbconfig_trivial_usage \
@@ -2739,12 +2742,12 @@
        "	-f	Foreground" \
      "\n	-b	Background (default)" \
      "\n	-S	Log to syslog (default)" \
-     "\n	-l	Set log level. 0 is the most verbose, default 8" \
+     "\n	-l N	Set log level. Most verbose:0, default:8" \
 	IF_FEATURE_CROND_D( \
-     "\n	-d	Set log level, log to stderr" \
+     "\n	-d N	Set log level, log to stderr" \
 	) \
-     "\n	-L	Log to file" \
-     "\n	-c	Working dir" \
+     "\n	-L FILE	Log to FILE" \
+     "\n	-c DIR	Cron dir. Default:"CONFIG_FEATURE_CROND_DIR"/crontabs" \
 
 #define crontab_trivial_usage \
        "[-c DIR] [-u USER] [-ler]|[FILE]" \
@@ -3332,7 +3335,7 @@
 	"[SYMBOL=VALUE]..." \
 
 #define insmod_full_usage "\n\n" \
-       "Load the specified kernel modules into the kernel" \
+       "Load kernel module" \
 	IF_FEATURE_2_4_MODULES( "\n" \
      "\n	-f	Force module to load into the wrong kernel version" \
      "\n	-k	Make module autoclean-able" \
@@ -3389,7 +3392,7 @@
 	"[SYMBOL=VALUE]..." \
 
 #define insmod_full_usage "\n\n" \
-       "Load the specified kernel modules into the kernel" \
+       "Load kernel module" \
 	IF_FEATURE_2_4_MODULES( "\n" \
      "\n	-f	Force module to load into the wrong kernel version" \
      "\n	-k	Make module autoclean-able" \
@@ -3415,7 +3418,7 @@
        "$ rmmod tulip\n" \
 
 #define modprobe_trivial_usage \
-	"[-qfwrsv] MODULE [symbol=value]..." \
+	"[-qfwrsv] MODULE [SYMBOL=VALUE]..." \
 
 #define modprobe_full_usage "\n\n" \
        "	-r	Remove MODULE (stacks) or do autoclean" \
@@ -3492,7 +3495,7 @@
 
 #define modprobe_trivial_usage \
 	"[-alrqvsD" IF_FEATURE_MODPROBE_BLACKLIST("b") "]" \
-	" MODULE [symbol=value]..." \
+	" MODULE [SYMBOL=VALUE]..." \
 
 #define modprobe_full_usage "\n\n" \
        "	-a	Load multiple MODULEs" \
@@ -4109,6 +4112,9 @@
 	) \
      "\n	-S PROG	Run PROG after stepping time, stratum change, and every 11 mins" \
      "\n	-p PEER	Obtain time from PEER (may be repeated)" \
+	IF_FEATURE_NTPD_CONF( \
+     "\n		If -p is not given, read /etc/ntp.conf" \
+	) \
 
 #if !ENABLE_FEATURE_FANCY_PING \
 
@@ -5806,11 +5812,15 @@
 #define linux64_full_usage "" \
 
 #define swapon_trivial_usage \
-       "[-a]" IF_FEATURE_SWAPON_PRI(" [-p PRI]") " [DEVICE]" \
+       "[-a]" IF_FEATURE_SWAPON_DISCARD(" [-d[POL]]") IF_FEATURE_SWAPON_PRI(" [-p PRI]") " [DEVICE]" \
 
 #define swapon_full_usage "\n\n" \
        "Start swapping on DEVICE\n" \
      "\n	-a	Start swapping on all swap devices" \
+	IF_FEATURE_SWAPON_DISCARD( \
+     "\n	-d[POL]	Discard blocks at swapon (POL=once)," \
+     "\n		as freed (POL=pages), or both (POL omitted)" \
+	) \
 	IF_FEATURE_SWAPON_PRI( \
      "\n	-p PRI	Set swap device priority" \
 	) \

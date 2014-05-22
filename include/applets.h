@@ -9,7 +9,7 @@
 
 /*
 name  - applet name as it is typed on command line
-name2 - applet name, converted to C (ether-wake: name2 = ether_wake)
+help  - applet name, converted to C (ether-wake: help = ether_wake)
 main  - corresponding <applet>_main to call (bzcat: main = bunzip2)
 l     - location to install link to: [/usr]/[s]bin
 s     - suid type:
@@ -25,46 +25,46 @@ s     - suid type:
 
 #if defined(PROTOTYPES)
 # define APPLET(name,l,s)                    int name##_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-# define APPLET_ODDNAME(name,main,l,s,name2) int main##_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-# define APPLET_NOEXEC(name,main,l,s,name2)  int main##_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-# define APPLET_NOFORK(name,main,l,s,name2)  int main##_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
+# define APPLET_ODDNAME(name,main,l,s,help)  int main##_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
+# define APPLET_NOEXEC(name,main,l,s,help)   int main##_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
+# define APPLET_NOFORK(name,main,l,s,help)   int main##_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 
-#elif defined(NAME_MAIN_CNAME)
-# define APPLET(name,l,s)                    name name##_main name
-# define APPLET_ODDNAME(name,main,l,s,name2) name main##_main name2
-# define APPLET_NOEXEC(name,main,l,s,name2)  name main##_main name2
-# define APPLET_NOFORK(name,main,l,s,name2)  name main##_main name2
+#elif defined(NAME_MAIN)
+# define APPLET(name,l,s)                    name name##_main
+# define APPLET_ODDNAME(name,main,l,s,help)  name main##_main
+# define APPLET_NOEXEC(name,main,l,s,help)   name main##_main
+# define APPLET_NOFORK(name,main,l,s,help)   name main##_main
 
 #elif defined(MAKE_USAGE) && ENABLE_FEATURE_VERBOSE_USAGE
 # define APPLET(name,l,s)                    MAKE_USAGE(#name, name##_trivial_usage name##_full_usage)
-# define APPLET_ODDNAME(name,main,l,s,name2) MAKE_USAGE(#name, name2##_trivial_usage name2##_full_usage)
-# define APPLET_NOEXEC(name,main,l,s,name2)  MAKE_USAGE(#name, name2##_trivial_usage name2##_full_usage)
-# define APPLET_NOFORK(name,main,l,s,name2)  MAKE_USAGE(#name, name2##_trivial_usage name2##_full_usage)
+# define APPLET_ODDNAME(name,main,l,s,help)  MAKE_USAGE(#name, help##_trivial_usage help##_full_usage)
+# define APPLET_NOEXEC(name,main,l,s,help)   MAKE_USAGE(#name, help##_trivial_usage help##_full_usage)
+# define APPLET_NOFORK(name,main,l,s,help)   MAKE_USAGE(#name, help##_trivial_usage help##_full_usage)
 
 #elif defined(MAKE_USAGE) && !ENABLE_FEATURE_VERBOSE_USAGE
 # define APPLET(name,l,s)                    MAKE_USAGE(#name, name##_trivial_usage)
-# define APPLET_ODDNAME(name,main,l,s,name2) MAKE_USAGE(#name, name2##_trivial_usage)
-# define APPLET_NOEXEC(name,main,l,s,name2)  MAKE_USAGE(#name, name2##_trivial_usage)
-# define APPLET_NOFORK(name,main,l,s,name2)  MAKE_USAGE(#name, name2##_trivial_usage)
+# define APPLET_ODDNAME(name,main,l,s,help)  MAKE_USAGE(#name, help##_trivial_usage)
+# define APPLET_NOEXEC(name,main,l,s,help)   MAKE_USAGE(#name, help##_trivial_usage)
+# define APPLET_NOFORK(name,main,l,s,help)   MAKE_USAGE(#name, help##_trivial_usage)
 
 #elif defined(MAKE_LINKS)
 # define APPLET(name,l,c)                    LINK l name
-# define APPLET_ODDNAME(name,main,l,s,name2) LINK l name
-# define APPLET_NOEXEC(name,main,l,s,name2)  LINK l name
-# define APPLET_NOFORK(name,main,l,s,name2)  LINK l name
+# define APPLET_ODDNAME(name,main,l,s,help)  LINK l name
+# define APPLET_NOEXEC(name,main,l,s,help)   LINK l name
+# define APPLET_NOFORK(name,main,l,s,help)   LINK l name
 
 #elif defined(MAKE_SUID)
 # define APPLET(name,l,s)                    SUID s l name
-# define APPLET_ODDNAME(name,main,l,s,name2) SUID s l name
-# define APPLET_NOEXEC(name,main,l,s,name2)  SUID s l name
-# define APPLET_NOFORK(name,main,l,s,name2)  SUID s l name
+# define APPLET_ODDNAME(name,main,l,s,help)  SUID s l name
+# define APPLET_NOEXEC(name,main,l,s,help)   SUID s l name
+# define APPLET_NOFORK(name,main,l,s,help)   SUID s l name
 
 #else
   static struct bb_applet applets[] = { /*    name, main, location, need_suid */
 # define APPLET(name,l,s)                    { #name, #name, l, s },
-# define APPLET_ODDNAME(name,main,l,s,name2) { #name, #main, l, s },
-# define APPLET_NOEXEC(name,main,l,s,name2)  { #name, #main, l, s, 1 },
-# define APPLET_NOFORK(name,main,l,s,name2)  { #name, #main, l, s, 1, 1 },
+# define APPLET_ODDNAME(name,main,l,s,help)  { #name, #main, l, s },
+# define APPLET_NOEXEC(name,main,l,s,help)   { #name, #main, l, s, 1 },
+# define APPLET_NOFORK(name,main,l,s,help)   { #name, #main, l, s, 1, 1 },
 #endif
 
 #if ENABLE_INSTALL_NO_USR
@@ -128,6 +128,7 @@ IF_MESG(APPLET(mesg, BB_DIR_USR_BIN, BB_SUID_DROP))
 IF_ADD_SHELL(   APPLET_ODDNAME(add-shell   , add_remove_shell, BB_DIR_USR_SBIN, BB_SUID_DROP, add_shell   ))
 IF_REMOVE_SHELL(APPLET_ODDNAME(remove-shell, add_remove_shell, BB_DIR_USR_SBIN, BB_SUID_DROP, remove_shell))
 IF_CONSPY(APPLET(conspy, BB_DIR_BIN, BB_SUID_DROP))
+IF_CROND(APPLET(crond, BB_DIR_USR_SBIN, BB_SUID_DROP))
 IF_NANDWRITE(APPLET(nandwrite, BB_DIR_USR_SBIN, BB_SUID_DROP))
 IF_NANDDUMP(APPLET_ODDNAME(nanddump, nandwrite, BB_DIR_USR_SBIN, BB_SUID_DROP, nanddump))
 IF_RFKILL(APPLET(rfkill, BB_DIR_USR_SBIN, BB_SUID_DROP))
@@ -144,10 +145,10 @@ IF_INSMOD(APPLET(insmod, BB_DIR_SBIN, BB_SUID_DROP))
 IF_LSMOD(APPLET(lsmod, BB_DIR_SBIN, BB_SUID_DROP))
 IF_MODINFO(APPLET(modinfo, BB_DIR_SBIN, BB_SUID_DROP))
 IF_MODPROBE_SMALL(APPLET(modprobe, BB_DIR_SBIN, BB_SUID_DROP))
-IF_MODPROBE_SMALL(APPLET_ODDNAME(depmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
-IF_MODPROBE_SMALL(APPLET_ODDNAME(insmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
-IF_MODPROBE_SMALL(APPLET_ODDNAME(lsmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
-IF_MODPROBE_SMALL(APPLET_ODDNAME(rmmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, modprobe))
+IF_MODPROBE_SMALL(APPLET_ODDNAME(depmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, depmod))
+IF_MODPROBE_SMALL(APPLET_ODDNAME(insmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, insmod))
+IF_MODPROBE_SMALL(APPLET_ODDNAME(lsmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, lsmod))
+IF_MODPROBE_SMALL(APPLET_ODDNAME(rmmod, modprobe, BB_DIR_SBIN, BB_SUID_DROP, rmmod))
 IF_MODPROBE(APPLET(modprobe, BB_DIR_SBIN, BB_SUID_DROP))
 IF_RMMOD(APPLET(rmmod, BB_DIR_SBIN, BB_SUID_DROP))
 IF_NBDCLIENT(APPLET_ODDNAME(nbd-client, nbdclient, BB_DIR_USR_SBIN, BB_SUID_DROP, nbdclient))
@@ -207,7 +208,6 @@ IF_CKSUM(APPLET_NOEXEC(cksum, cksum, BB_DIR_USR_BIN, BB_SUID_DROP, cksum))
 IF_CLEAR(APPLET(clear, BB_DIR_USR_BIN, BB_SUID_DROP))
 IF_COMM(APPLET(comm, BB_DIR_USR_BIN, BB_SUID_DROP))
 IF_CP(APPLET_NOEXEC(cp, cp, BB_DIR_BIN, BB_SUID_DROP, cp))
-IF_CROND(APPLET(crond, BB_DIR_USR_SBIN, BB_SUID_DROP))
 /* Needs to be run by root or be suid root - needs to change /var/spool/cron* files: */
 IF_CRONTAB(APPLET(crontab, BB_DIR_USR_BIN, BB_SUID_REQUIRE))
 IF_CRYPTPW(APPLET(cryptpw, BB_DIR_USR_BIN, BB_SUID_DROP))
@@ -505,7 +505,7 @@ IF_WHOAMI(APPLET_NOFORK(whoami, whoami, BB_DIR_USR_BIN, BB_SUID_DROP, whoami))
 IF_YES(APPLET_NOFORK(yes, yes, BB_DIR_USR_BIN, BB_SUID_DROP, yes))
 IF_ZCIP(APPLET(zcip, BB_DIR_SBIN, BB_SUID_DROP))
 
-#if !defined(PROTOTYPES) && !defined(NAME_MAIN_CNAME) && !defined(MAKE_USAGE) \
+#if !defined(PROTOTYPES) && !defined(NAME_MAIN) && !defined(MAKE_USAGE) \
 	&& !defined(MAKE_LINKS) && !defined(MAKE_SUID)
 };
 #endif
