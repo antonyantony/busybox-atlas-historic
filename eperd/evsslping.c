@@ -3,6 +3,7 @@
  * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
+#include "json-macros.h"
 #include "libbb.h"
 #include "atlas_bb64.h"
 #include "atlas_probe.h"
@@ -66,6 +67,7 @@ struct ssl_state {
 
 	int opt_retry_max;
 	int opt_ignore_cert;
+	int opt_rset;
 
 	int dns_count;
 	struct event  timeout;
@@ -81,13 +83,112 @@ static struct option longopts[]=
 	{ "retry",  required_argument, NULL, O_RETRY },
 };
 
+bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
+bufferevent_data_cb read_cb(struct bufferevent *bev, short events, void *ptr);
+void print_ssl_resp(struct ssl_state *qry);
+
 static struct ssl_base *ssl_base = NULL; 
 
+void print_ssl_resp(struct ssl_state *qry) {
+	FILE *fh;
+	char addrstr[INET6_ADDRSTRLEN];
+        char dst_addr_str[(INET6_ADDRSTRLEN+1)];
+	void *ptr = NULL;
+	bool write_out = FALSE;
+
+	int fw = get_atlas_fw_version();
+	int lts =  -1 ;//get_timesync();
+
+	if (!qry->result.size){
+		AS("RESULT { ");
+		if(qry->str_Atlas) 
+		{
+			JS(id, qry->str_Atlas);
+		}
+		JD(fw, fw);
+		if (qry->opt_rset){
+			JS1(time, %ld, qry->xmit_time.tv_sec);
+			JD(lts,lts);
+			AS("\"resultset\" : [ {"); } 
+	} else if(qry->opt_rset) {
+		AS (",{");
+	}
+
+	JS1(time, %ld,  qry->xmit_time.tv_sec);
+	JD(lts,lts);
+
+	if (qry->addr_curr->ai_family && qry->host){
+
+		switch (qry->addr_curr->ai_family) 
+		{
+			case AF_INET: 
+				ptr = &((struct sockaddr_in *) qry->addr_curr->ai_addr)->sin_addr;
+			break;
+			case AF_INET6:
+				ptr = &((struct sockaddr_in6 *) qry->addr_curr->ai_addr)->sin6_addr; 
+			break; 
+		}
+		inet_ntop (qry->addr_curr->ai_family, ptr, addrstr, INET6_ADDRSTRLEN);
+		if(strcmp(addrstr, qry->host)) {
+			JS(dst_name, qry->host);
+		}
+		JS(dst_addr , addrstr);
+		JD(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4); 
+	} else if (qry->host) {
+		JS(dst_name, qry->host);
+	}
+
+	if(qry->retry) {
+		JS1(retry, %d,  qry->retry);
+	}
+
+	if(qry->err.size) 
+	{
+		AS(", \"error\" : {");
+		buf_add(&qry->result,qry->err.buf, qry->err.size);
+		AS("}"); 
+	}
+	AS (" }"); //result 
+
+	/* end of result only JSON closing brackets from here on */
+
+	if(qry->opt_rset) {
+		AS("}");  /* resultset : [{ } */
+	}
+	else {
+		write_out = TRUE;
+	}
+
+	if(write_out && qry->result.size){
+		if (qry->out_filename)
+		{
+			fh= fopen(qry->out_filename, "a");
+			if (!fh) {
+				crondlog(LVL8 "unable to append to '%s'",
+						qry->out_filename);
+			}
+		}
+		else
+			fh = stdout;
+		if (fh) {
+			AS (" }\n");   /* RESULT { } */
+			fwrite(qry->result.buf, qry->result.size, 1 , fh);
+		}
+		buf_cleanup(&qry->result);
+
+		if (qry->out_filename)
+			fclose(fh);
+	}
+
+
+	qry->retry = 0;
+	//free_qry_inst(qry);
+}
 
 static void timeout_cb(int unused  UNUSED_PARAM, const short event
 		UNUSED_PARAM, void *h)
 {
-	struct query_state *qry = h;
+	struct ssl_state *qry = h;
 	crondlog(LVL9, "timeout called");
 	printf("timeout called");
 	event_base_loopexit(EventBase, NULL);
@@ -168,10 +269,19 @@ static void msecstotv(time_t msecs, struct timeval *tv)
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 {
+	struct ssl_state *qry = ptr;
+	struct timeval rectime ;
+
 	if (events & BEV_EVENT_CONNECTED)
 	{
+		gettimeofday(&rectime, NULL);
+
+		qry->triptime = (rectime.tv_sec - qry->xmit_time.tv_sec)*1000 +
+			(rectime.tv_usec - qry->xmit_time.tv_usec)/1e3;
+
 		printf (" called %s event BEV_EVENT_CONNECTED 0x%02x\n", __func__, events);
-		//bufferevent_free(bev);
+		print_ssl_resp(qry);
+		bufferevent_free(bev);
 		event_base_loopexit(EventBase, NULL);
 		return;
 	}
@@ -216,7 +326,6 @@ static bool ssl_arg_validate (int argc, char *argv[], struct ssl_state *qry )
 static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(void *state))
 {
 	int c;
-
 	struct ssl_state *qry = NULL;
 
 	if (ssl_base == NULL)
@@ -242,8 +351,11 @@ static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(voi
 	}
 	qry->retry  = 0;
 	qry->opt_retry_max = 0;
+	qry->opt_rset = 0;
 	qry->port = "443";
 	qry->opt_ignore_cert = 0;
+	buf_init(&qry->err, -1);
+	buf_init(&qry->result, -1);
 
 	evtimer_assign(&qry->timeout, EventBase, timeout_cb, qry);
 
@@ -259,11 +371,11 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 
 	if (result != 0)
 	{
-		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"TUDNS\" : \"%s\"",
+		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"EVDNS\" : \"%s\"",
 				qry->err.size ? ", " : "",
 				evutil_gai_strerror(result));
 		buf_add(&qry->err, line, strlen(line));
-		printReply(qry, 0 , NULL);
+		print_ssl_resp(qry);
 		return;
 	}
 	qry->addr = res;
@@ -276,6 +388,7 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 
 void ssl_start (struct ssl_state *qry)
 {
+	gettimeofday(&qry->xmit_time, NULL);
 	qry->hints.ai_family = AF_UNSPEC;
 	qry->hints.ai_flags = 0;
 	qry->hints.ai_socktype = SOCK_DGRAM;
@@ -361,7 +474,9 @@ void ssl_q_start (struct ssl_state *qry)
 					qry->addr_curr->ai_addr,
 					qry->addr_curr->ai_addrlen)) {
 			crondlog(LVL9, "bufferevent_socket_connect error");
+			bufferevent_free(qry->bev);
 		} else{
+			gettimeofday(&qry->xmit_time, NULL);
 			break;
 		}
 	}
@@ -400,7 +515,6 @@ int evsslping_main(int argc, char **argv)
 		event_base_free (EventBase);
 		return 1;
 	}
-
 
 	ssl_start(qry);
 
