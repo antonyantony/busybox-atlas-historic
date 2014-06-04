@@ -54,8 +54,8 @@ struct ssl_state {
 	char * str_Atlas;
 	char * out_filename;
 
-	struct buf err; 
-	struct buf result; 
+	struct buf err;
+	struct buf result;
 
 	struct evutil_addrinfo *addr;
 	struct evutil_addrinfo *addr_curr;
@@ -82,6 +82,16 @@ static struct option longopts[]=
 };
 
 static struct ssl_base *ssl_base = NULL; 
+
+
+static void timeout_cb(int unused  UNUSED_PARAM, const short event
+		UNUSED_PARAM, void *h)
+{
+	struct query_state *qry = h;
+	crondlog(LVL9, "timeout called");
+	printf("timeout called");
+	event_base_loopexit(EventBase, NULL);
+}
 
 /* See http://archives.seul.org/libevent/users/Jan-2013/msg00039.html */
 static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
@@ -144,7 +154,7 @@ static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
 	} else {
 		printf("Got '%s' for hostname '%s' and certificate:\n%s\n",
 		       res_str, host, cert_str);
-		return 0;
+		return 1;
 	}
 }
 
@@ -226,11 +236,17 @@ static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(voi
 	}
 
 	if (!ssl_arg_validate(argc, argv, qry))
+	{
+		crondlog(LVL8 "ssl_arg_validate failed");
 		return NULL; 
+	}
 	qry->retry  = 0;
 	qry->opt_retry_max = 0;
 	qry->port = "443";
 	qry->opt_ignore_cert = 0;
+
+	evtimer_assign(&qry->timeout, EventBase, timeout_cb, qry);
+
 
 	return qry;
 }
@@ -251,7 +267,6 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 		return;
 	}
 	qry->addr = res;
-	qry->addr_curr = res;
 	qry->dns_count =  0;
 	for (cur= res; cur; cur= cur->ai_next)
 		qry->dns_count++;
@@ -292,10 +307,7 @@ void ssl_q_start (struct ssl_state *qry)
 
 	/* Attempt to use the system's trusted root certificates.
 	 * (This path is only valid for Debian-based systems.) */
-	if (1 != SSL_CTX_load_verify_locations(qry->ssl_ctx,
-					       "/etc/ssl/certs/ca-certificates.crt",
-					       NULL))
-		crondlog(LVL7,"SSL_CTX_load_verify_locations");
+	 if (1 != SSL_CTX_load_verify_locations(qry->ssl_ctx, "/etc/ssl/certs/ca-certificates.crt", NULL)) crondlog(LVL7,"SSL_CTX_load_verify_locations");
 	/* Ask OpenSSL to verify the server certificate.  Note that this
 	 * does NOT include verifying that the hostname is correct.
 	 * So, by itself, this means anyone with any legitimate
@@ -304,7 +316,9 @@ void ssl_q_start (struct ssl_state *qry)
 	 * Most Dangerous Code in the World" article at
 	 * https://crypto.stanford.edu/~dabo/pubs/abstracts/ssl-client-bugs.html
 	 */
+
 	SSL_CTX_set_verify(qry->ssl_ctx, SSL_VERIFY_PEER, NULL);
+	
 	/* This is how we solve the problem mentioned in the previous
 	 * comment.  We "wrap" OpenSSL's validation routine in our
 	 * own routine, which also validates the hostname by calling
@@ -318,8 +332,7 @@ void ssl_q_start (struct ssl_state *qry)
 	 * OpenSSL's built-in routine which would have been called if
 	 * we hadn't set the callback.  Therefore, we're just
 	 * "wrapping" OpenSSL's routine, not replacing it. */
-	SSL_CTX_set_cert_verify_callback (qry->ssl_ctx, cert_verify_callback,
-					  (void *) qry->host);
+	SSL_CTX_set_cert_verify_callback (qry->ssl_ctx, cert_verify_callback, (void *) qry->host);
 	
 
 
@@ -346,8 +359,11 @@ void ssl_q_start (struct ssl_state *qry)
 			qry->addr_curr = qry->addr_curr->ai_next) {
 		if (bufferevent_socket_connect(qry->bev,
 					qry->addr_curr->ai_addr,
-					qry->addr_curr->ai_addrlen))
+					qry->addr_curr->ai_addrlen)) {
+			crondlog(LVL9, "bufferevent_socket_connect error");
+		} else{
 			break;
+		}
 	}
 
 	if (r < 0) {
