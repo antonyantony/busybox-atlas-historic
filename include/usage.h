@@ -6162,6 +6162,12 @@
 #define evsslgetcert_full_usage "\n\n" \
      "todo"
 
+#define evsslping_trivial_usage \
+       "todo"
+#define evsslping_full_usage "\n\n" \
+     "todo"
+
+
 #define evtraceroute_trivial_usage \
         "-[46FIrTU] [-a <paris mod>] [-c <count>] [-f <hop>]" \
 "\n     [-g <gap>] [-m <hop>] [-w <ms>] [-z <ms>] [-A <string>] [-O <file>]" \

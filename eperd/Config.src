@@ -86,6 +86,12 @@ config EVSSLGETCERT
         help
                 standalone version of event-driven sslgetcert
 
+config EVSSLPING
+        bool "evsslping"
+        default n
+        help
+                ping ssl server with various paramenters and summarize
+
 config EVTDIG
 	bool "evtdig"
 	default n
