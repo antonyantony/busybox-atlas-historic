@@ -148,6 +148,7 @@
 	IF_FEATURE_CPIO_P( \
      "\n	-p DIR	Copy files to DIR" \
 	) \
+     "\nOptions:" \
      "\n	-d	Make leading directories" \
      "\n	-m	Preserve mtime" \
      "\n	-v	Verbose" \
@@ -452,10 +453,10 @@
        "$ setkeycodes e030 127\n" \
 
 #define setlogcons_trivial_usage \
-       "N" \
+       "[N]" \
 
 #define setlogcons_full_usage "\n\n" \
-       "Redirect the kernel output to console N (0 for current)" \
+       "Redirect the kernel output to console N. Default:0 (current console)" \
 
 #define showkey_trivial_usage \
        "[-a | -k | -s]" \
@@ -724,6 +725,7 @@
 #define df_trivial_usage \
 	"[-Pk" \
 	IF_FEATURE_HUMAN_READABLE("mh") \
+	"T" \
 	IF_FEATURE_DF_FANCY("ai] [-B SIZE") \
 	"] [FILESYSTEM]..." \
 
@@ -735,6 +737,7 @@
      "\n	-m	1M-byte blocks" \
      "\n	-h	Human readable (e.g. 1K 243M 2G)" \
 	) \
+     "\n	-T	Print filesystem type" \
 	IF_FEATURE_DF_FANCY( \
      "\n	-a	Show all filesystems" \
      "\n	-i	Inodes" \
@@ -1000,7 +1003,7 @@
        "andersen lp dialout cdrom floppy\n" \
 
 #define install_trivial_usage \
-	"[-cdDsp] [-o USER] [-g GRP] [-m MODE] [SOURCE]... DEST" \
+	"[-cdDsp] [-o USER] [-g GRP] [-m MODE] [-t DIR] [SOURCE]... DEST" \
 
 #define install_full_usage "\n\n" \
        "Copy files and set attributes\n" \
@@ -1012,6 +1015,7 @@
      "\n	-o USER	Set ownership" \
      "\n	-g GRP	Set group ownership" \
      "\n	-m MODE	Set permissions" \
+     "\n	-t DIR	Install to DIR" \
 	IF_SELINUX( \
      "\n	-Z	Set security context" \
 	) \
@@ -1681,6 +1685,12 @@
        "b\n" \
        "c\n" \
 
+#define unlink_trivial_usage \
+	"FILE" \
+
+#define unlink_full_usage "\n\n" \
+	"Delete FILE by calling unlink()" \
+
 #define usleep_trivial_usage \
        "N" \
 
@@ -2148,6 +2158,9 @@
      "\n	-exec CMD ARG ;	Run CMD with all instances of {} replaced by" \
      "\n			file name. Fails if CMD exits with nonzero" \
 	) \
+	IF_FEATURE_FIND_EXEC_PLUS( \
+     "\n	-exec CMD ARG + Run CMD with {} replaced by list of file names" \
+	) \
 	IF_FEATURE_FIND_DELETE( \
      "\n	-delete		Delete current file/directory. Turns on -depth option" \
 	) \
@@ -2423,6 +2436,12 @@
        "	y	Allow write access to your terminal\n" \
        "	n	Disallow write access to your terminal" \
 
+#define unit_trivial_usage \
+       "" \
+
+#define unit_full_usage "\n\n" \
+       "Run the unit-test suite" \
+
 #define parse_trivial_usage \
        "[-x] [-n MAXTOKENS] [-m MINTOKENS] [-d DELIMS] [-f FLAGS] FILE..." \
 
@@ -2442,10 +2461,10 @@
        "Remove SHELLs from /etc/shells" \
 
 #define addgroup_trivial_usage \
-       "[-g GID] " IF_FEATURE_ADDUSER_TO_GROUP("[USER] ") "GROUP" \
+       "[-g GID] [-S] " IF_FEATURE_ADDUSER_TO_GROUP("[USER] ") "GROUP" \
 
 #define addgroup_full_usage "\n\n" \
-       "Add a group " IF_FEATURE_ADDUSER_TO_GROUP("or add a user to a group") "\n" \
+       "Add a group" IF_FEATURE_ADDUSER_TO_GROUP(" or add a user to a group") "\n" \
      "\n	-g GID	Group id" \
      "\n	-S	Create a system group" \
 
@@ -3096,15 +3115,17 @@
      "\n	-s ADDR	Start address" \
 
 #define nanddump_trivial_usage \
-	"[-o] [-b] [-s ADDR] [-l LEN] [-f FILE] MTD_DEVICE" \
+	"[-o] [--bb=padbad|skipbad] [-s ADDR] [-l LEN] [-f FILE] MTD_DEVICE" \
 
 #define nanddump_full_usage "\n\n" \
 	"Dump MTD_DEVICE\n" \
      "\n	-o	Dump oob data" \
-     "\n	-b	Omit bad block from the dump" \
      "\n	-s ADDR	Start address" \
      "\n	-l LEN	Length" \
      "\n	-f FILE	Dump to file ('-' for stdout)" \
+     "\n	--bb=METHOD:" \
+     "\n		skipbad: skip bad blocks" \
+     "\n		padbad: substitute bad blocks by 0xff (default)" \
 
 #define raidautorun_trivial_usage \
        "DEVICE" \
@@ -4098,7 +4119,7 @@
        "Address:    127.0.0.1\n" \
 
 #define ntpd_trivial_usage \
-	"[-dnqNw"IF_FEATURE_NTPD_SERVER("l")"] [-S PROG] [-p PEER]..." \
+	"[-dnqNw"IF_FEATURE_NTPD_SERVER("l -I IFACE")"] [-S PROG] [-p PEER]..." \
 
 #define ntpd_full_usage "\n\n" \
        "NTP client/server\n" \
@@ -4109,6 +4130,7 @@
      "\n	-w	Do not set time (only query peers), implies -n" \
 	IF_FEATURE_NTPD_SERVER( \
      "\n	-l	Run as server on port 123" \
+     "\n	-I IFACE Bind server to IFACE, implies -l" \
 	) \
      "\n	-S PROG	Run PROG after stepping time, stratum change, and every 11 mins" \
      "\n	-p PEER	Obtain time from PEER (may be repeated)" \
@@ -4148,8 +4170,9 @@
      "\n			(after all -c CNT packets are sent)" \
      "\n	-w SEC		Seconds until ping exits (default:infinite)" \
      "\n			(can exit earlier with -c CNT)" \
-     "\n	-q		Quiet, only displays output at start" \
+     "\n	-q		Quiet, only display output at start" \
      "\n			and when finished" \
+     "\n	-p		Pattern to use for payload" \
 
 # define ping6_trivial_usage \
        "[OPTIONS] HOST" \
@@ -4159,8 +4182,9 @@
      "\n	-c CNT		Send only CNT pings" \
      "\n	-s SIZE		Send SIZE data bytes in packets (default:56)" \
      "\n	-I IFACE/IP	Use interface or IP address as source" \
-     "\n	-q		Quiet, only displays output at start" \
+     "\n	-q		Quiet, only display output at start" \
      "\n			and when finished" \
+     "\n	-p		Pattern to use for payload" \
 
 #endif \
 
@@ -4440,7 +4464,11 @@
      "\n	-f		Run in foreground" \
      "\n	-q		Quit after obtaining address" \
      "\n	-r 169.254.x.x	Request this address first" \
+     "\n	-l x.x.0.0	Use this range instead of 169.254" \
      "\n	-v		Verbose" \
+     "\n" \
+     "\n$LOGGING=none		Suppress logging" \
+     "\n$LOGGING=syslog 	Log to syslog" \
      "\n" \
      "\nWith no -q, runs continuously monitoring for ARP conflicts," \
      "\nexits only on I/O errors (link down etc)" \
@@ -5189,28 +5217,28 @@
        "(this version of syslogd ignores /etc/syslog.conf)\n" \
 	) \
      "\n	-n		Run in foreground" \
-     "\n	-O FILE		Log to FILE (default:/var/log/messages)" \
-     "\n	-l N		Log only messages more urgent than prio N (1-8)" \
-     "\n	-S		Smaller output" \
-	IF_FEATURE_ROTATE_LOGFILE( \
-     "\n	-s SIZE		Max size (KB) before rotation (default:200KB, 0=off)" \
-     "\n	-b N		N rotated logs to keep (default:1, max=99, 0=purge)" \
-	) \
 	IF_FEATURE_REMOTE_LOG( \
      "\n	-R HOST[:PORT]	Log to HOST:PORT (default PORT:514)" \
      "\n	-L		Log locally and via network (default is network only if -R)" \
 	) \
-	IF_FEATURE_SYSLOGD_DUP( \
-     "\n	-D		Drop duplicates" \
-	) \
 	IF_FEATURE_IPC_SYSLOG( \
      "\n	-C[size_kb]	Log to shared mem buffer (use logread to read it)" \
 	) \
-	IF_FEATURE_SYSLOGD_CFG( \
-     "\n	-f FILE		Use FILE as config (default:/etc/syslog.conf)" \
-	) \
 	IF_FEATURE_KMSG_SYSLOG( \
      "\n	-K		Log to kernel printk buffer (use dmesg to read it)" \
+	) \
+     "\n	-O FILE		Log to FILE (default:/var/log/messages, stdout if -)" \
+	IF_FEATURE_ROTATE_LOGFILE( \
+     "\n	-s SIZE		Max size (KB) before rotation (default:200KB, 0=off)" \
+     "\n	-b N		N rotated logs to keep (default:1, max=99, 0=purge)" \
+	) \
+     "\n	-l N		Log only messages more urgent than prio N (1-8)" \
+     "\n	-S		Smaller output" \
+	IF_FEATURE_SYSLOGD_DUP( \
+     "\n	-D		Drop duplicates" \
+	) \
+	IF_FEATURE_SYSLOGD_CFG( \
+     "\n	-f FILE		Use FILE as config (default:/etc/syslog.conf)" \
 	) \
 
 #define syslogd_example_usage \
@@ -5269,6 +5297,20 @@
      "\n	-c		Clear ring buffer after printing" \
      "\n	-n LEVEL	Set console logging level" \
      "\n	-s SIZE		Buffer size" \
+
+#define fatattr_trivial_usage \
+       "[-+rhsvda] FILE..." \
+
+#define fatattr_full_usage "\n\n" \
+       "Change file attributes on FAT filesystem\n" \
+     "\n	-	Clear attributes" \
+     "\n	+	Set attributes" \
+     "\n	r	Read only" \
+     "\n	h	Hidden" \
+     "\n	s	System" \
+     "\n	v	Volume label" \
+     "\n	d	Directory" \
+     "\n	a	Archive" \
 
 #define fbset_trivial_usage \
        "[OPTIONS] [MODE]" \
@@ -5974,7 +6016,7 @@
 #endif \
 
 #define udhcpc_trivial_usage \
-       "[-fbq"IF_UDHCP_VERBOSE("v")IF_FEATURE_UDHCPC_ARPING("a")"RB] [-t N] [-T SEC] [-A SEC/-n]\n" \
+       "[-fbq"IF_UDHCP_VERBOSE("v")"RB]"IF_FEATURE_UDHCPC_ARPING(" [-a[MSEC]]")" [-t N] [-T SEC] [-A SEC/-n]\n" \
        "	[-i IFACE]"IF_FEATURE_UDHCP_PORT(" [-P PORT]")" [-s PROG] [-p PIDFILE]\n" \
        "	[-oC] [-r IP] [-V VENDOR] [-F NAME] [-x OPT:VAL]... [-O OPT]..." \
 
@@ -5999,7 +6041,7 @@
 	) \
      "\n	-S,--syslog		Log to syslog too" \
 	IF_FEATURE_UDHCPC_ARPING( \
-     "\n	-a,--arping		Use arping to validate offered address" \
+     "\n	-a[MSEC],--arping[=MSEC] Validate offered address with ARP ping" \
 	) \
      "\n	-r,--request IP		Request this IP address" \
      "\n	-o,--no-default-options	Don't request any options (unless -O is given)" \
@@ -6036,7 +6078,7 @@
 	) \
      "\n	-S		Log to syslog too" \
 	IF_FEATURE_UDHCPC_ARPING( \
-     "\n	-a		Use arping to validate offered address" \
+     "\n	-a[MSEC]	Validate offered address with ARP ping" \
 	) \
      "\n	-r IP		Request this IP address" \
      "\n	-o		Don't request any options (unless -O is given)" \
@@ -6065,6 +6107,7 @@
      "\n	-f	Run in foreground" \
      "\n	-S	Log to syslog too" \
      "\n	-I ADDR	Local address" \
+     "\n	-a MSEC	Timeout for ARP ping (default 2000)" \
 	IF_FEATURE_UDHCP_PORT( \
      "\n	-P N	Use port N (default 67)" \
 	) \
