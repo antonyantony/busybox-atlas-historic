@@ -38,6 +38,8 @@
 
 #define MAX_INTERVAL	(2*366*24*3600)	/* No intervals bigger than 2 years */
 
+#define MAX_INTERVAL	(2*366*24*3600)	/* No intervals bigger than 2 years */
+
 #define URANDOM_DEV	"/dev/urandom"
 #define ATLAS_FW_VERSION	"/home/atlas/state/FIRMWARE_APPS_VERSION"
 
