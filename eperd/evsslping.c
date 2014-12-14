@@ -42,6 +42,13 @@ struct ssl_base {
 	struct event_base *event_base;
 };
 
+enum readstate { READ_FIRST, READ_STATUS, READ_HEADER, READ_BODY, READ_SIMPLE,
+	READ_CHUNKED, READ_CHUNK_BODY, READ_CHUNK_END,
+	READ_CHUNKED_TRAILER,
+	READ_DONE };
+enum writestate { WRITE_FIRST, WRITE_HEADER, WRITE_POST_HEADER,
+	WRITE_POST_FILE, WRITE_POST_FOOTER, WRITE_DONE };
+
 /* How to keep track of each user sslping query */
 struct ssl_state {
 
@@ -61,9 +68,17 @@ struct ssl_state {
 	struct evutil_addrinfo *addr;
 	struct evutil_addrinfo *addr_curr;
 
-	struct timeval xmit_time;
+	struct timeval start_time;
 	double triptime;
+	double ttc;
 	int retry;
+
+	char do_get;
+	char do_head;
+	char do_http10;
+	char *user_agent;
+	char *path;
+
 
 	int opt_retry_max;
 	int opt_ignore_cert;
@@ -73,6 +88,9 @@ struct ssl_state {
 	struct event  timeout;
 	struct timeval timeout_tv;
 	struct evutil_addrinfo hints;
+	enum readstate readstate;
+	enum writestate writestate;
+
 
 	u_char *outbuff;
 };
@@ -83,9 +101,11 @@ static struct option longopts[]=
 	{ "retry",  required_argument, NULL, O_RETRY },
 };
 
+
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
-bufferevent_data_cb read_cb(struct bufferevent *bev, short events, void *ptr);
+static void write_cb(struct bufferevent *bev, void *ptr);
 void print_ssl_resp(struct ssl_state *qry);
+static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr);
 
 static struct ssl_base *ssl_base = NULL; 
 
@@ -107,14 +127,14 @@ void print_ssl_resp(struct ssl_state *qry) {
 		}
 		JD(fw, fw);
 		if (qry->opt_rset){
-			JS1(time, %ld, qry->xmit_time.tv_sec);
+			JS1(time, %ld, qry->start_time.tv_sec);
 			JD(lts,lts);
 			AS("\"resultset\" : [ {"); } 
 	} else if(qry->opt_rset) {
 		AS (",{");
 	}
 
-	JS1(time, %ld,  qry->xmit_time.tv_sec);
+	JS1(time, %ld,  qry->start_time.tv_sec);
 	JD(lts,lts);
 
 	if (qry->addr_curr->ai_family && qry->host){
@@ -276,22 +296,76 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 	{
 		gettimeofday(&rectime, NULL);
 
-		qry->triptime = (rectime.tv_sec - qry->xmit_time.tv_sec)*1000 +
-			(rectime.tv_usec - qry->xmit_time.tv_usec)/1e3;
+		qry->triptime = (rectime.tv_sec - qry->start_time.tv_sec)*1000 +
+			(rectime.tv_usec - qry->start_time.tv_usec)/1e3;
 
 		printf (" called %s event BEV_EVENT_CONNECTED 0x%02x\n", __func__, events);
-		print_ssl_resp(qry);
-		bufferevent_free(bev);
-		event_base_loopexit(EventBase, NULL);
+		write_cb(qry->bev, qry);
+		//print_ssl_resp(qry);
+		//bufferevent_free(bev);
+		//event_base_loopexit(EventBase, NULL);
 		return;
 	}
 	else {
 		printf (" called %s unknown event 0x%02x\n", __func__, events);
 	}
 }
-bufferevent_data_cb read_cb(struct bufferevent *bev, short events, void *ptr)
+
+static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 {
-	printf (" called %s\n", __func__);
+	struct ssl_state  *qry = ptr;
+	fprintf(stderr, " got read call the rest should be fine %s \n", __func__);
+	print_ssl_resp(qry);
+	bufferevent_free(bev);
+	event_base_loopexit(EventBase, NULL);
+}
+static void write_cb(struct bufferevent *bev, void *ptr)
+{
+	int r;
+	struct evbuffer *output;
+	off_t cLength;
+	struct stat sb;
+	struct timeval endtime;
+	struct ssl_state  *qry = ptr;
+
+	printf("%s: start:\n", __func__);
+
+	for(;;)
+	{
+		switch(qry->writestate)
+		{
+		case WRITE_FIRST:
+			gettimeofday(&endtime, NULL);
+			qry->ttc= (endtime.tv_sec-
+				qry->start_time.tv_sec)*1e3 +
+				(endtime.tv_usec - qry->start_time.tv_usec)/1e3;
+			qry->writestate= WRITE_HEADER;
+			continue;
+		case WRITE_HEADER:
+			output= bufferevent_get_output(bev);
+			evbuffer_add_printf(output, "%s %s HTTP/1.%c\r\n",
+				qry->do_get ? "GET" :
+				qry->do_head ? "HEAD" : "POST", qry->path,
+				qry->do_http10 ? '0' : '1');
+			evbuffer_add_printf(output, "Host: %s\r\n",
+				qry->host);
+			evbuffer_add_printf(output, "Connection: close\r\n");
+			evbuffer_add_printf(output, "User-Agent: %s\r\n",
+				qry->user_agent);
+			evbuffer_add_printf(output, "\r\n");
+
+			qry->writestate = WRITE_DONE;
+			printf("%s: done: \n", __func__);
+			return;
+
+		case WRITE_DONE:
+			return;
+		default:
+			printf("writecb: unknown write state: %d\n",
+				qry->writestate);
+			return;
+		}
+	}
 
 }
 
@@ -327,6 +401,7 @@ static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(voi
 {
 	int c;
 	struct ssl_state *qry = NULL;
+	LogFile = "/dev/tty";
 
 	if (ssl_base == NULL)
 		ssl_base_new(EventBase);
@@ -356,6 +431,13 @@ static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(voi
 	qry->opt_ignore_cert = 0;
 	buf_init(&qry->err, -1);
 	buf_init(&qry->result, -1);
+	qry->do_http10= 0;
+	qry->do_get= 0;
+	qry->do_head= 1;
+	qry->user_agent= "httpget for atlas.ripe.net";
+	qry->path = "/";
+	qry->ttc = 0;
+	qry->triptime = 0;
 
 	evtimer_assign(&qry->timeout, EventBase, timeout_cb, qry);
 
@@ -388,7 +470,7 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 
 void ssl_start (struct ssl_state *qry)
 {
-	gettimeofday(&qry->xmit_time, NULL);
+	gettimeofday(&qry->start_time, NULL);
 	qry->hints.ai_family = AF_UNSPEC;
 	qry->hints.ai_flags = 0;
 	qry->hints.ai_socktype = SOCK_DGRAM;
@@ -466,7 +548,7 @@ void ssl_q_start (struct ssl_state *qry)
 			BEV_OPT_CLOSE_ON_FREE);
 
 	bufferevent_openssl_set_allow_dirty_shutdown(qry->bev, 1);
-	bufferevent_setcb(qry->bev, read_cb, NULL, event_cb, qry);
+	bufferevent_setcb(qry->bev, http_read_cb, write_cb, event_cb, qry);
 
 	for (qry->addr_curr = qry->addr; qry->addr_curr;
 			qry->addr_curr = qry->addr_curr->ai_next) {
@@ -476,7 +558,7 @@ void ssl_q_start (struct ssl_state *qry)
 			crondlog(LVL9, "bufferevent_socket_connect error");
 			bufferevent_free(qry->bev);
 		} else{
-			gettimeofday(&qry->xmit_time, NULL);
+			gettimeofday(&qry->start_time, NULL);
 			break;
 		}
 	}
