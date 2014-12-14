@@ -4721,15 +4721,15 @@ static struct pipe *parse_stream(char **pstring,
 	}
 }
 
-int builitin_rptaddr6(int argc, char *argv[]);
+int builitin_rptaddrs(int argc, char *argv[]);
 
-static int builtin_rptaddr6(char **argv) 
+static int builtin_rptaddrs(char **argv) 
 {
 	int argc;
 
 	for (argc= 0; argv[argc] != 0; argc++)
 		;
-	return rptaddr6_main(argc, argv);
+	return rptaddrs_main(argc, argv);
 }
 
 

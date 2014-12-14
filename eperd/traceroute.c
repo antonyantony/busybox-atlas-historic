@@ -5,7 +5,6 @@
  */
 
 #include "libbb.h"
-#include "atlas_probe.h"
 #include <event2/dns.h>
 #include <event2/event.h>
 #include <event2/event_struct.h>
@@ -16,6 +15,7 @@
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
 
+#include "atlas_probe.h"
 #include "eperd.h"
 
 #define SAFE_PREFIX ATLAS_DATA_NEW
@@ -29,7 +29,7 @@
 #define uh_sum check
 #endif
 
-#define TRACEROUTE_OPT_STRING ("!46IUFrTa:c:f:g:m:p:w:z:A:O:S:H:D:")
+#define TRACEROUTE_OPT_STRING ("!46IUFrTa:b:c:f:g:i:m:p:w:z:A:O:S:H:D:")
 
 #define OPT_4	(1 << 0)
 #define OPT_6	(1 << 1)
@@ -64,20 +64,7 @@ struct trtbase
 {
 	struct event_base *event_base;
 
-	int v4icmp_rcv;
-	int v6icmp_rcv;
-	int v4icmp_snd;
-	int v6icmp_snd;
-	int v4tcp_rcv;
-	int v6tcp_rcv;
-	int v4udp_snd;
-
 	int my_pid;
-
-	struct event event4;
-	struct event tcp_event4;
-	struct event event6;
-	struct event tcp_event6;
 
 	struct trtstate **table;
 	int tabsiz;
@@ -96,9 +83,10 @@ struct trtstate
 	/* Parameters */
 	char *atlas;
 	char *hostname;
-	const char *destportstr;
+	char *destportstr;
 	char *out_filename;
-	char do_Xicmp;
+	char *interface;
+	char do_icmp;
 	char do_tcp;
 	char do_udp;
 	char do_v6;
@@ -112,6 +100,7 @@ struct trtstate
 	unsigned char maxhops;
 	unsigned char gaplimit;
 	unsigned char parismod;
+	unsigned char parisbase;
 	unsigned duptimeout;
 	unsigned timeout;
 
@@ -129,6 +118,13 @@ struct trtstate
 	uint16_t paris;
 	uint16_t seq;
 	unsigned short curpacksize;
+	
+	int socket_icmp;		/* Socket for sending and receiving
+					 * ICMPs */
+	struct event event_icmp;	/* Event for this socket */
+	int socket_tcp;			/* Socket for sending and receiving
+					 * raw TCP */
+	struct event event_tcp;		/* Event for this socket */
 
 	uint8_t last_response_hop;	/* Hop at which we last got something
 					 * back.
@@ -161,6 +157,7 @@ struct trtstate
 	char *result;
 	size_t reslen;
 	size_t resmax;
+	char open_result;
 };
 
 static struct trtbase *trt_base;
@@ -191,6 +188,8 @@ struct v6info
 	uint32_t seq;
 	struct timeval tv;
 };
+
+static int create_socket(struct trtstate *state, int do_tcp);
 
 #define OPT_PAD1 0
 #define OPT_PADN 1
@@ -388,9 +387,11 @@ static void report(struct trtstate *state)
 	{
 		fprintf(fh, DBQ(id) ":" DBQ(%s)
 			", " DBQ(fw) ":%d"
+			", " DBQ(lts) ":%d"
 			", " DBQ(time) ":%ld"
 			", " DBQ(endtime) ":%ld, ",
 			state->atlas, get_atlas_fw_version(),
+			get_timesync(),
 			state->starttime,
 			(long)time(NULL));
 	}
@@ -413,7 +414,7 @@ static void report(struct trtstate *state)
 		fprintf(fh, ", " DBQ(src_addr) ":" DBQ(%s), namebuf);
 	}
 
-	if (state->do_Xicmp)
+	if (state->do_icmp)
 		proto= "ICMP";
 	else if (state->do_tcp)
 		proto= "TCP";
@@ -427,16 +428,31 @@ static void report(struct trtstate *state)
 	fprintf(fh, ", \"size\":%d", state->maxpacksize);
 	if (state->parismod)
 	{
-		fprintf(fh, ", \"paris_id\":%d",
-			state->paris % state->parismod);
+		fprintf(fh, ", \"paris_id\":%d", state->paris);
 	}
 	fprintf(fh, ", \"result\": [ %s ] }\n", state->result);
+
 	free(state->result);
 	state->result= NULL;
-	state->busy= 0;
 
 	if (state->out_filename)
 		fclose(fh);
+
+	/* Kill the event and close socket */
+	if (state->socket_icmp != -1)
+	{
+		event_del(&state->event_icmp);
+		close(state->socket_icmp);
+		state->socket_icmp= -1;
+	}
+	if (state->socket_tcp != -1)
+	{
+		event_del(&state->event_tcp);
+		close(state->socket_tcp);
+		state->socket_tcp= -1;
+	}
+
+	state->busy= 0;
 
 	if (state->base->done)
 		state->base->done(state);
@@ -499,8 +515,9 @@ static void send_pkt(struct trtstate *state)
 		}
 
 		snprintf(line, sizeof(line),
-			", { \"hop\":%d, \"result\": [ ", state->hop);
+			", { " DBQ(hop) ":%d, " DBQ(result) ": [ ", state->hop);
 		add_str(state, line);
+		state->open_result= 0;
 	}
 	state->seq++;
 
@@ -515,7 +532,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "IPv6 socket failed");
+				crondlog(DIE9 "socket failed");
 			}
 
 			on= 1;
@@ -629,21 +646,21 @@ static void send_pkt(struct trtstate *state)
 				}
 			}
 		}
-		else if (state->do_Xicmp)
+		else if (state->do_icmp)
 		{
 			/* Set hop count */
-			setsockopt(base->v6icmp_snd, SOL_IPV6,
+			setsockopt(state->socket_icmp, SOL_IPV6,
 				IPV6_UNICAST_HOPS, &hop, sizeof(hop));
 
 			/* Set/clear don't fragment */
 			on= (state->dont_fragment ? IPV6_PMTUDISC_DO :
 				IPV6_PMTUDISC_DONT);
-			setsockopt(base->v6icmp_snd, IPPROTO_IPV6,
+			setsockopt(state->socket_icmp, IPPROTO_IPV6,
 					IPV6_MTU_DISCOVER, &on, sizeof(on));
 
-			do_hbh_dest_opt(base, base->v6icmp_snd, 0 /* hbh */,
+			do_hbh_dest_opt(base, state->socket_icmp, 0 /* hbh */,
 					 state->hbhoptsize);
-			do_hbh_dest_opt(base, base->v6icmp_snd, 1 /* dest */,
+			do_hbh_dest_opt(base, state->socket_icmp, 1 /* dest */,
 					 state->destoptsize);
 
 			icmp6_hdr= (struct icmp6_hdr *)base->packet;
@@ -687,7 +704,7 @@ static void send_pkt(struct trtstate *state)
 					(unsigned short *)base->packet, len);
 
 				/* Avoid 0 */
-				val= state->paris % state->parismod + 1;
+				val= state->paris + 1;
 
 				sum= ntohs(sum);
 				usum= sum + (0xffff - val);
@@ -709,7 +726,7 @@ static void send_pkt(struct trtstate *state)
 			memset(&sin6copy, '\0', sizeof(sin6copy));
 			sin6copy.sin6_family= AF_INET6;
 			sin6copy.sin6_addr= state->sin6.sin6_addr;
-			r= sendto(base->v6icmp_snd, base->packet, len, 0,
+			r= sendto(state->socket_icmp, base->packet, len, 0,
 				(struct sockaddr *)&sin6copy,
 				sizeof(sin6copy));
 
@@ -739,7 +756,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET6, SOCK_DGRAM, 0);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "IPv6 socket failed");
+				crondlog(DIE9 "socket failed");
 			}
 
 			on= 1;
@@ -779,7 +796,7 @@ static void send_pkt(struct trtstate *state)
 			if (state->parismod)
 			{
 				state->sin6.sin6_port= htons(BASE_PORT +
-					(state->paris % state->parismod));
+					state->paris);
 			}
 			else
 			{
@@ -865,7 +882,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "IPV4 socket failed");
+				crondlog(DIE9 "socket failed");
 			}
 
 			on= 1;
@@ -997,7 +1014,7 @@ static void send_pkt(struct trtstate *state)
 				}
 			}
 		}
-		else if (state->do_Xicmp)
+		else if (state->do_icmp)
 		{
 			hop= state->hop;
 
@@ -1045,16 +1062,16 @@ static void send_pkt(struct trtstate *state)
 #endif
 
 			/* Set hop count */
-			setsockopt(base->v4icmp_snd, IPPROTO_IP, IP_TTL,
+			setsockopt(state->socket_icmp, IPPROTO_IP, IP_TTL,
 				&hop, sizeof(hop));
 
 			/* Set/clear don't fragment */
 			on= (state->dont_fragment ? IP_PMTUDISC_DO :
 				IP_PMTUDISC_DONT);
-			setsockopt(base->v4icmp_snd, IPPROTO_IP,
+			setsockopt(state->socket_icmp, IPPROTO_IP,
 				IP_MTU_DISCOVER, &on, sizeof(on));
 
-			r= sendto(base->v4icmp_snd, base->packet, len, 0,
+			r= sendto(state->socket_icmp, base->packet, len, 0,
 				(struct sockaddr *)&state->sin6,
 				state->socklen);
 
@@ -1084,7 +1101,7 @@ static void send_pkt(struct trtstate *state)
 			sock= socket(AF_INET, SOCK_DGRAM, 0);
 			if (sock == -1)
 			{
-				crondlog(DIE9 "IPv4 socket failed");
+				crondlog(DIE9 "socket failed");
 			}
 
 			on= 1;
@@ -1119,8 +1136,7 @@ static void send_pkt(struct trtstate *state)
 			if (state->parismod)
 			{
 				((struct sockaddr_in *)&state->sin6)->sin_port=
-					htons(BASE_PORT +
-					(state->paris % state->parismod));
+					htons(BASE_PORT + state->paris);
 			}
 			else
 			{
@@ -1225,9 +1241,10 @@ static void send_pkt(struct trtstate *state)
 		}
 	}
 
-	if (state->sent)
+	if (state->open_result)
 		add_str(state, " }, ");
 	add_str(state, "{ ");
+	state->open_result= 0;
 
 	/* Increment packets sent */
 	state->sent++;
@@ -1282,9 +1299,13 @@ static void do_icmp_multi(struct trtstate *state,
 	cksum= in_cksum((unsigned short *)packet, size);
 	if (cksum != 0)
 	{
-		/* There is also anoption for a zero checksum. */
+		/* There is also an option for a zero checksum. */
 		if (!pre_rfc4884)
+		{
+#if 0
 			printf("do_icmp_multi: bad checksum\n");
+#endif
+		}
 		return;
 	}
 
@@ -1312,7 +1333,9 @@ static void do_icmp_multi(struct trtstate *state,
 		if (len < 4 || o+len > size)
 		{
 			add_str(state, " }");
+#if 0
 			printf("do_icmp_multi: bad len %d\n", len);
+#endif
 			break;
 		}
 		if (class == ICMPEXT_MPLS && ctype == ICMPEXT_MPLS_IN)
@@ -1345,10 +1368,11 @@ static void ready_callback4(int __attribute((unused)) unused,
 
 	gettimeofday(&now, NULL);
 
-	base= s;
+	state= s;
+	base= state->base;
 
 	slen= sizeof(remote);
-	nrecv= recvfrom(base->v4icmp_rcv, base->packet, sizeof(base->packet),
+	nrecv= recvfrom(state->socket_icmp, base->packet, sizeof(base->packet),
 		MSG_DONTWAIT, (struct sockaddr *)&remote, &slen);
 	if (nrecv == -1)
 	{
@@ -1403,8 +1427,10 @@ static void ready_callback4(int __attribute((unused)) unused,
 			if (srcport < SRC_BASE_PORT ||
 				srcport > SRC_BASE_PORT+256)
 			{
+#if 0
 				printf(
 	"ready_callback4: unknown TCP port in ICMP: %d\n", srcport);
+#endif
 				return;	/* Not for us */
 			}
 
@@ -1413,9 +1439,8 @@ static void ready_callback4(int __attribute((unused)) unused,
 			 */
 			ind= ntohl(etcp->seq) >> 16;
 
-			state= NULL;
-			if (ind >= 0 && ind < base->tabsiz)
-				state= base->table[ind];
+			if (ind != state->index)
+				state= NULL;
 			if (state && state->sin6.sin6_family != AF_INET)
 				state= NULL;
 			if (state && !state->do_tcp)
@@ -1454,6 +1479,9 @@ static void ready_callback4(int __attribute((unused)) unused,
 			/* Sequence number is in seq field */
 			seq= ntohl(etcp->seq) & 0xffff;
 
+			if (state->open_result)
+				add_str(state, " }, { ");
+
 			if (seq != state->seq)
 			{
 				if (seq > state->seq)
@@ -1468,14 +1496,14 @@ static void ready_callback4(int __attribute((unused)) unused,
 				}
 				late= 1;
 
-				snprintf(line, sizeof(line), "\"late\":%d",
+				snprintf(line, sizeof(line), DBQ(late) ":%d",
 					state->seq-seq);
 				add_str(state, line);
 			}
 			else if (state->gotresp)
 			{
 				isDup= 1;
-				add_str(state, " }, { \"dup\":true");
+				add_str(state, " " DBQ(dup) ":true");
 			}
 
 			if (!late && !isDup)
@@ -1612,12 +1640,11 @@ printf("curpacksize: %d\n", state->curpacksize);
 			 */
 			ind= ntohs(eudp->uh_sport) - SRC_BASE_PORT;
 
-			state= NULL;
-			if (ind >= 0 && ind < base->tabsiz)
-				state= base->table[ind];
+			if (ind != state->index)
+				state= NULL;
 			if (state && state->sin6.sin6_family != AF_INET)
 				state= NULL;
-			if (state && state->do_Xicmp)
+			if (state && state->do_icmp)
 				state= NULL;	
 
 			if (!state)
@@ -1666,6 +1693,9 @@ printf("curpacksize: %d\n", state->curpacksize);
 				seq= ntohs(eudp->uh_dport)-BASE_PORT;
 			}
 
+			if (state->open_result)
+				add_str(state, " }, { ");
+
 			if (seq != state->seq)
 			{
 				if (seq > state->seq)
@@ -1680,14 +1710,14 @@ printf("curpacksize: %d\n", state->curpacksize);
 				}
 				late= 1;
 
-				snprintf(line, sizeof(line), "\"late\":%d",
+				snprintf(line, sizeof(line), DBQ(late) ":%d",
 					state->seq-seq);
 				add_str(state, line);
 			}
 			else if (state->gotresp)
 			{
 				isDup= 1;
-				add_str(state, " }, { \"dup\":true");
+				add_str(state, " " DBQ(dup) ":true");
 			}
 
 			if (!late && !isDup)
@@ -1840,13 +1870,14 @@ printf("curpacksize: %d\n", state->curpacksize);
 				return;
 			}
 
-			state= base->table[ind];
-			if (!state)
+			if (ind != state->index)
 			{
 				/* Nothing here */
+#if 0
 				printf(
 				"ready_callback4: nothing at index (%d)\n",
 					ind);
+#endif
 				return;
 			}
 
@@ -1856,7 +1887,7 @@ printf("curpacksize: %d\n", state->curpacksize);
 				return;
 			}
 
-			if (!state->do_Xicmp)
+			if (!state->do_icmp)
 			{
 				printf(
 			"ready_callback4: index (%d) is not doing ICMP\n",
@@ -1877,9 +1908,12 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			{
 				printf(
 	"ready_callback4: mismatch for paris, got 0x%x, expected 0x%x (%s)\n",
-					ntohs(eicmp->icmp_cksum), state->paris,
-					state->hostname);
+					ntohs(eicmp->icmp_cksum),
+					state->paris, state->hostname);
 			}
+
+			if (state->open_result)
+				add_str(state, " }, { ");
 
 			late= 0;
 			isDup= 0;
@@ -1898,14 +1932,14 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 				}
 				late= 1;
 
-				snprintf(line, sizeof(line), "\"late\":%d",
+				snprintf(line, sizeof(line), DBQ(late) ":%d",
 					state->seq-seq);
 				add_str(state, line);
 			}
 			else if (state->gotresp)
 			{
 				isDup= 1;
-				add_str(state, " }, { \"dup\":true");
+				add_str(state, DBQ(dup) ":true");
 			}
 
 			if (!late && !isDup)
@@ -2040,8 +2074,10 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 		if (icmp_prefixlen != 0)
 		{
 			
+#if 0
 			printf("icmp_pmvoid: 0x%x for %s\n", icmp->icmp_pmvoid, state->hostname);
 			printf("icmp_prefixlen: 0x%x for %s\n", icmp_prefixlen, inet_ntoa(remote.sin_addr));
+#endif
 			offset= hlen + ICMP_MINLEN + icmp_prefixlen;
 			if (nrecv > offset)
 			{
@@ -2050,9 +2086,11 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			}
 			else
 			{
+#if 0
 				printf(
 			"ready_callback4: too short %d (Multi-Part ICMP)\n",
 					(int)nrecv);
+#endif
 			}
 		}
 		else if (nrecv > hlen + ICMP_MINLEN + 128)
@@ -2073,8 +2111,7 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			}
 		}
 
-		if (late)
-			add_str(state, " }, { ");
+		state->open_result= 1;
 
 		if (!late && !isDup)
 		{
@@ -2110,13 +2147,14 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			return;
 		}
 
-		state= base->table[ind];
-		if (!state)
+		if (ind != state->index)
 		{
 			/* Nothing here */
+#if 0
 			printf(
 			"ready_callback4: nothing at index (%d)\n",
 				ind);
+#endif
 			return;
 		}
 
@@ -2135,6 +2173,9 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			return;
 		}
 
+		if (state->open_result)
+			add_str(state, " }, { ");
+
 		late= 0;
 		isDup= 0;
 		seq= ntohs(icmp->icmp_seq);
@@ -2151,14 +2192,14 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			}
 			late= 1;
 
-			snprintf(line, sizeof(line), "\"late\":%d",
+			snprintf(line, sizeof(line), DBQ(late) ":%d",
 				state->seq-seq);
 			add_str(state, line);
 		}
 		else if (state->gotresp)
 		{
 			isDup= 1;
-			add_str(state, " }, { \"dup\":true");
+			add_str(state, DBQ(dup) ":true");
 		}
 
 		if (memcmp(&ip->ip_dst,
@@ -2196,8 +2237,7 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 		/* Done */
 		state->done= 1;
 
-		if (late)
-			add_str(state, " }, { ");
+		state->open_result= 1;
 
 		if (!late && !isDup)
 		{
@@ -2246,10 +2286,11 @@ static void ready_tcp4(int __attribute((unused)) unused,
 
 	gettimeofday(&now, NULL);
 
-	base= s;
+	state= s;
+	base= state->base;
 
 	slen= sizeof(remote);
-	nrecv= recvfrom(base->v4tcp_rcv, base->packet, sizeof(base->packet),
+	nrecv= recvfrom(state->socket_tcp, base->packet, sizeof(base->packet),
 		MSG_DONTWAIT, (struct sockaddr *)&remote, &slen);
 	if (nrecv == -1)
 	{
@@ -2280,9 +2321,8 @@ static void ready_tcp4(int __attribute((unused)) unused,
 	/* We store the id in high order 16 bits of the sequence number */
 	ind= ntohl(tcphdr->ack_seq) >> 16;
 
-	state= NULL;
-	if (ind >= 0 && ind < base->tabsiz)
-		state= base->table[ind];
+	if (ind != state->index)
+		state= NULL;
 	if (state && state->sin6.sin6_family != AF_INET)
 		state= NULL;
 	if (state && !state->do_tcp)
@@ -2307,6 +2347,9 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 	late= 0;
 	isDup= 0;
 
+	if (state->open_result)
+		add_str(state, " }, { ");
+
 	/* Only check if the ack is without 64k of what we expect */
 	seq= ntohl(tcphdr->ack_seq) & 0xffff;
 	if (seq-state->seq > 0x2000)
@@ -2323,14 +2366,14 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 		}
 		late= 1;
 
-		snprintf(line, sizeof(line), "\"late\":%d",
+		snprintf(line, sizeof(line), DBQ(late) ":%d",
 			state->seq-seq);
 		add_str(state, line);
 	}
 	else if (state->gotresp)
 	{
 		isDup= 1;
-		add_str(state, " }, { \"dup\":true");
+		add_str(state, DBQ(dup) ":true");
 	}
 
 	ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
@@ -2369,8 +2412,7 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 	/* Done */
 	state->done= 1;
 
-	if (late)
-		add_str(state, " }, { ");
+	state->open_result= 1;
 
 	if (!late && !isDup)
 	{
@@ -2412,7 +2454,8 @@ static void ready_tcp6(int __attribute((unused)) unused,
 
 	gettimeofday(&now, NULL);
 
-	base= s;
+	state= s;
+	base= state->base;
 
 	iov[0].iov_base= base->packet;
 	iov[0].iov_len= sizeof(base->packet);
@@ -2424,7 +2467,7 @@ static void ready_tcp6(int __attribute((unused)) unused,
 	msg.msg_controllen= sizeof(cmsgbuf);
 	msg.msg_flags= 0;			/* Not really needed */
 
-	nrecv= recvmsg(base->v6tcp_rcv, &msg, MSG_DONTWAIT);
+	nrecv= recvmsg(state->socket_tcp, &msg, MSG_DONTWAIT);
 	if (nrecv == -1)
 	{
 		/* Strange, read error */
@@ -2464,9 +2507,8 @@ static void ready_tcp6(int __attribute((unused)) unused,
 	/* We store the id in high order 16 bits of the sequence number */
 	ind= ntohl(tcphdr->ack_seq) >> 16;
 
-	state= NULL;
-	if (ind >= 0 && ind < base->tabsiz)
-		state= base->table[ind];
+	if (ind != state->index)
+		state= NULL;
 	if (state && state->sin6.sin6_family != AF_INET6)
 		state= NULL;
 	if (state && !state->do_tcp)
@@ -2489,6 +2531,9 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 	late= 0;
 	isDup= 0;
 
+	if (state->open_result)
+		add_str(state, " }, { ");
+
 	/* Only check if the ack is within 64k of what we expect */
 	seq= ntohl(tcphdr->ack_seq) & 0xffff;
 	if (seq-state->seq > 0x2000)
@@ -2505,14 +2550,14 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 		}
 		late= 1;
 
-		snprintf(line, sizeof(line), "\"late\":%d",
+		snprintf(line, sizeof(line), DBQ(late) ":%d",
 			state->seq-seq);
 		add_str(state, line);
 	}
 	else if (state->gotresp)
 	{
 		isDup= 1;
-		add_str(state, " }, { \"dup\":true");
+		add_str(state, DBQ(dup) ":true");
 	}
 
 	ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
@@ -2550,8 +2595,7 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 	/* Done */
 	state->done= 1;
 
-	if (late)
-		add_str(state, " }, { ");
+	state->open_result= 1;
 
 	if (!late && !isDup)
 	{
@@ -2600,7 +2644,8 @@ static void ready_callback6(int __attribute((unused)) unused,
 
 	gettimeofday(&now, NULL);
 
-	base= s;
+	state= s;
+	base= state->base;
 
 	iov[0].iov_base= base->packet;
 	iov[0].iov_len= sizeof(base->packet);
@@ -2612,7 +2657,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 	msg.msg_controllen= sizeof(cmsgbuf);
 	msg.msg_flags= 0;			/* Not really needed */
 
-	nrecv= recvmsg(base->v6icmp_rcv, &msg, MSG_DONTWAIT);
+	nrecv= recvmsg(state->socket_icmp, &msg, MSG_DONTWAIT);
 	if (nrecv == -1)
 	{
 		/* Strange, read error */
@@ -2696,7 +2741,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 #endif
 					return;
 				}
-				opthdr= (struct ip6_ext *)&eip[1];
+				opthdr= (struct ip6_ext *)ptr;
 				hbhoptsize= 8*opthdr->ip6e_len;
 				optlen= hbhoptsize+8;
 				if (nrecv < sizeof(*icmp) + sizeof(*eip) +
@@ -2705,7 +2750,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 					/* Does not contain the full header */
 					return;
 				}
-				ehdrsiz= optlen;
+				ehdrsiz += optlen;
 				nxt= opthdr->ip6e_nxt;
 				ptr= ((char *)opthdr)+optlen;
 			}
@@ -2724,7 +2769,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 #endif
 					return;
 				}
-				frag= (struct ip6_frag *)&eip[1];
+				frag= (struct ip6_frag *)ptr;
 				if ((ntohs(frag->ip6f_offlg) & ~3) != 0)
 				{
 					/* Not first fragment, just ignore
@@ -2732,7 +2777,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 					 */
 					return;
 				}
-				ehdrsiz= sizeof(*frag);
+				ehdrsiz += sizeof(*frag);
 				nxt= frag->ip6f_nxt;
 				ptr= &frag[1];
 			}
@@ -2751,7 +2796,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 #endif
 					return;
 				}
-				opthdr= (struct ip6_ext *)&eip[1];
+				opthdr= (struct ip6_ext *)ptr;
 				dstoptsize= 8*opthdr->ip6e_len;
 				optlen= dstoptsize+8;
 				if (nrecv < sizeof(*icmp) + sizeof(*eip) +
@@ -2760,7 +2805,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 					/* Does not contain the full header */
 					return;
 				}
-				ehdrsiz= optlen;
+				ehdrsiz += optlen;
 				nxt= opthdr->ip6e_nxt;
 				ptr= ((char *)opthdr)+optlen;
 			}
@@ -2839,9 +2884,8 @@ static void ready_callback6(int __attribute((unused)) unused,
 				ind= ntohl(v6info->id);
 			}
 
-			state= NULL;
-			if (ind >= 0 && ind < base->tabsiz)
-				state= base->table[ind];
+			if (ind != state->index)
+				state= NULL;
 
 			if (state && state->sin6.sin6_family != AF_INET6)
 				state= NULL;
@@ -2850,7 +2894,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 			{
 				if ((etcp && !state->do_tcp) ||
 					(eudp && !state->do_udp) ||
-					(eicmp && !state->do_Xicmp))
+					(eicmp && !state->do_icmp))
 				{
 					state= NULL;	
 				}
@@ -2889,6 +2933,10 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			}
 			else
 				seq= ntohl(v6info->seq);
+
+			if (state->open_result)
+				add_str(state, " }, { ");
+
 			if (seq != state->seq)
 			{
 				if (seq > state->seq)
@@ -2903,13 +2951,13 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 				}
 				late= 1;
 
-				snprintf(line, sizeof(line), "\"late\":%d",
+				snprintf(line, sizeof(line), DBQ(late) ":%d",
 					state->seq-seq);
 				add_str(state, line);
 			} else if (state->gotresp)
 			{
 				isDup= 1;
-				add_str(state, " }, { \"dup\":true");
+				add_str(state, DBQ(dup) ":true");
 			}
 
 			if (!late && !isDup)
@@ -2944,12 +2992,12 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 
 			if (eicmp && state->parismod &&
 				ntohs(eicmp->icmp6_cksum) !=
-				state->paris % state->parismod + 1)
+				state->paris + 1)
 			{
 				printf(
 			"ready_callback6: got checksum 0x%x, expected 0x%x\n",
 					ntohs(eicmp->icmp6_cksum),
-					state->paris % state->parismod + 1);
+					state->paris + 1);
 			}
 
 			if (!late)
@@ -3043,16 +3091,19 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 					state->done= 1;
 				switch(icmp->icmp6_code)
 				{
-				case ICMP6_DST_UNREACH_NOROUTE:
+				case ICMP6_DST_UNREACH_NOROUTE:	/* 0 */
 					add_str(state, ", \"err\":\"N\"");
 					break;
-				case ICMP6_DST_UNREACH_ADDR:
+				case ICMP6_DST_UNREACH_ADMIN:	/* 1 */
+					add_str(state, ", \"err\":\"A\"");
+					break;
+				case ICMP6_DST_UNREACH_BEYONDSCOPE: /* 2 */
+					add_str(state, ", \"err\":\"h\"");
+					break;
+				case ICMP6_DST_UNREACH_ADDR:	/* 3 */
 					add_str(state, ", \"err\":\"H\"");
 					break;
-				case ICMP6_DST_UNREACH_NOPORT:
-					break;
-				case ICMP6_DST_UNREACH_ADMIN:
-					add_str(state, ", \"err\":\"A\"");
+				case ICMP6_DST_UNREACH_NOPORT:	/* 4 */
 					break;
 				default:
 					snprintf(line, sizeof(line),
@@ -3111,8 +3162,7 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			}
 		}
 
-		if (late)
-			add_str(state, " }, { ");
+		state->open_result= 1;
 
 		if (!late && !isDup)
 		{
@@ -3154,14 +3204,12 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 
 		ind= ntohl(v6info->id);
 
-		state= NULL;
-		if (ind >= 0 && ind < base->tabsiz)
-			state= base->table[ind];
-
+		if (ind != state->index)
+			state= NULL;
 		if (state && state->sin6.sin6_family != AF_INET6)
 			state= NULL;
 
-		if (state && !state->do_Xicmp)
+		if (state && !state->do_icmp)
 		{
 			state= NULL;	
 		}
@@ -3190,6 +3238,9 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			return;
 		}
 
+		if (state->open_result)
+			add_str(state, " }, { ");
+
 		late= 0;
 		isDup= 0;
 		seq= ntohl(v6info->seq);
@@ -3205,14 +3256,14 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			}
 			late= 1;
 
-			snprintf(line, sizeof(line), "\"late\":%d",
+			snprintf(line, sizeof(line), DBQ(late) ":%d",
 				state->seq-seq);
 			add_str(state, line);
 		}
 		else if (state->gotresp)
 		{
 			isDup= 1;
-			add_str(state, " }, { \"dup\":true");
+			add_str(state, DBQ(dup) ":true");
 		}
 
 		if (!late && !isDup)
@@ -3261,8 +3312,7 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			sizeof(buf)), state->hop);
 #endif
 
-		if (late)
-			add_str(state, " }, { ");
+		state->open_result= 1;
 
 		if (!late && !isDup)
 		{
@@ -3297,7 +3347,6 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 static struct trtbase *traceroute_base_new(struct event_base
 	*event_base)
 {
-	int on;
 	struct trtbase *base;
 
 	base= xzalloc(sizeof(*base));
@@ -3307,39 +3356,7 @@ static struct trtbase *traceroute_base_new(struct event_base
 	base->tabsiz= 10;
 	base->table= xzalloc(base->tabsiz * sizeof(*base->table));
 
-	base->v4icmp_rcv= xsocket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-	base->v6icmp_rcv= xsocket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
-	base->v4icmp_snd= xsocket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-	base->v6icmp_snd= xsocket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
-	base->v4tcp_rcv= xsocket(AF_INET, SOCK_RAW, IPPROTO_TCP);
-	base->v6tcp_rcv= xsocket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
-	base->v4udp_snd= xsocket(AF_INET, SOCK_DGRAM, 0);
-
 	base->my_pid= getpid();
-
-	on = 1;
-	setsockopt(base->v6icmp_rcv, IPPROTO_IPV6, IPV6_RECVPKTINFO,
-		&on, sizeof(on));
-
-	on = 1;
-	setsockopt(base->v6icmp_rcv, IPPROTO_IPV6, IPV6_RECVHOPLIMIT,
-		&on, sizeof(on));
-	on = 1;
-	setsockopt(base->v6tcp_rcv, IPPROTO_IPV6, IPV6_RECVHOPLIMIT,
-		&on, sizeof(on));
-
-	event_assign(&base->event4, base->event_base, base->v4icmp_rcv,
-		EV_READ | EV_PERSIST, ready_callback4, base);
-	event_assign(&base->tcp_event4, base->event_base, base->v4tcp_rcv,
-		EV_READ | EV_PERSIST, ready_tcp4, base);
-	event_assign(&base->event6, base->event_base, base->v6icmp_rcv,
-		EV_READ | EV_PERSIST, ready_callback6, base);
-	event_assign(&base->tcp_event6, base->event_base, base->v6tcp_rcv,
-		EV_READ | EV_PERSIST, ready_tcp6, base);
-	event_add(&base->event4, NULL);
-	event_add(&base->tcp_event4, NULL);
-	event_add(&base->event6, NULL);
-	event_add(&base->tcp_event6, NULL);
 
 	return base;
 }
@@ -3357,7 +3374,12 @@ static void noreply_callback(int __attribute((unused)) unused,
 #endif
 
 	if (!state->gotresp)
-		add_str(state, "\"x\":\"*\"");
+	{
+		if (state->open_result)
+			add_str(state, " }, { ");
+		add_str(state, DBQ(x) ":" DBQ(*));
+		state->open_result= 1;
+	}
 
 	send_pkt(state);
 }
@@ -3369,13 +3391,14 @@ static void *traceroute_init(int __attribute((unused)) argc, char *argv[],
 	uint32_t opt;
 	int i, do_icmp, do_v6, dont_fragment, delay_name_res, do_tcp, do_udp;
 	unsigned count, duptimeout, firsthop, gaplimit, maxhops, maxpacksize,
-		hbhoptsize, destoptsize, parismod, timeout;
+		hbhoptsize, destoptsize, parismod, parisbase, timeout;
 		/* must be int-sized */
 	size_t newsiz;
 	char *str_Atlas;
 	const char *hostname;
 	char *out_filename;
 	const char *destportstr;
+	char *interface;
 	char *check;
 	struct trtstate *state;
 	sa_family_t af;
@@ -3393,21 +3416,27 @@ static void *traceroute_init(int __attribute((unused)) argc, char *argv[],
 	count= 3;
 	firsthop= 1;
 	gaplimit= 5;
+	interface= NULL;
 	maxhops= 32;
 	maxpacksize= 40;
 	destportstr= "80";
 	duptimeout= 10;
 	timeout= 1000;
 	parismod= 16;
+	parisbase= 0;
+	hbhoptsize= 0;
+	destoptsize= 0;
 	str_Atlas= NULL;
 	out_filename= NULL;
-	opt_complementary = "=1:4--6:i--u:a+:c+:f+:g+:m+:w+:z+:S+:H+:D+";
+	opt_complementary = "=1:4--6:i--u:a+:b+:c+:f+:g+:m+:w+:z+:S+:H+:D+";
 
 for (i= 0; argv[i] != NULL; i++)
 	printf("argv[%d] = '%s'\n", i, argv[i]);
 
-	opt = getopt32(argv, TRACEROUTE_OPT_STRING, &parismod, &count,
-		&firsthop, &gaplimit, &maxhops, &destportstr, &timeout,
+	opt = getopt32(argv, TRACEROUTE_OPT_STRING, &parismod, &parisbase,
+		&count,
+		&firsthop, &gaplimit, &interface, &maxhops, &destportstr,
+		&timeout,
 		&duptimeout, &str_Atlas, &out_filename, &maxpacksize,
 		&hbhoptsize, &destoptsize);
 	hostname = argv[optind];
@@ -3431,7 +3460,7 @@ for (i= 0; argv[i] != NULL; i++)
 	{
 		if (!validate_filename(out_filename, SAFE_PREFIX))
 		{
-			crondlog(LVL8 "insecure file '%s' allowed %s", out_filename, SAFE_PREFIX);
+			crondlog(LVL8 "insecure file '%s'", out_filename);
 			return NULL;
 		}
 		fh= fopen(out_filename, "a");
@@ -3479,17 +3508,19 @@ for (i= 0; argv[i] != NULL; i++)
 
 	state= xzalloc(sizeof(*state));
 	state->parismod= parismod;
+	state->parisbase= parisbase;
 	state->trtcount= count;
 	state->firsthop= firsthop;
 	state->maxpacksize= maxpacksize;
 	state->maxhops= maxhops;
 	state->gaplimit= gaplimit;
-	state->destportstr= destportstr;
+	state->interface= interface;
+	state->destportstr= strdup(destportstr);
 	state->duptimeout= duptimeout*1000;
 	state->timeout= timeout*1000;
 	state->atlas= str_Atlas ? strdup(str_Atlas) : NULL;
 	state->hostname= strdup(hostname);
-	state->do_Xicmp= do_icmp;
+	state->do_icmp= do_icmp;
 	state->do_tcp= do_tcp;
 	state->do_udp= do_udp;
 	state->do_v6= do_v6;
@@ -3499,6 +3530,7 @@ for (i= 0; argv[i] != NULL; i++)
 	state->destoptsize= destoptsize;
 	state->out_filename= out_filename ? strdup(out_filename) : NULL;
 	state->base= trt_base;
+	state->paris= 0;
 	state->busy= 0;
 	state->result= NULL;
 	state->reslen= 0;
@@ -3549,15 +3581,10 @@ for (i= 0; argv[i] != NULL; i++)
 
 static void traceroute_start2(void *state)
 {
-	int r, serrno;
 	struct trtstate *trtstate;
-	struct trtbase *trtbase;
-	struct sockaddr_in loc_sa4;
-	struct sockaddr_in6 loc_sa6;
 	char line[80];
 
 	trtstate= state;
-	trtbase= trtstate->base;
 
 	if (trtstate->busy)
 	{
@@ -3576,7 +3603,11 @@ static void traceroute_start2(void *state)
 	trtstate->hop= trtstate->firsthop;
 	trtstate->sent= 0;
 	trtstate->seq= 0;
-	trtstate->paris++;
+	if (trtstate->parismod)
+	{
+		trtstate->paris= (trtstate->paris-trtstate->parisbase+1) %
+			trtstate->parismod + trtstate->parisbase;
+	}
 	trtstate->last_response_hop= 0;	/* Should be starting hop */
 	trtstate->done= 0;
 	trtstate->not_done= 0;
@@ -3587,231 +3618,235 @@ static void traceroute_start2(void *state)
 	trtstate->resmax= 80;
 	trtstate->result= xmalloc(trtstate->resmax);
 	trtstate->reslen= 0;
+	trtstate->open_result= 0;
 	trtstate->starttime= time(NULL);
+
+	trtstate->socket_icmp= -1;
+	trtstate->socket_tcp= -1;
 
 	snprintf(line, sizeof(line), "{ \"hop\":%d", trtstate->hop);
 	add_str(trtstate, line);
 
-	if (trtstate->do_Xicmp)
+	if (trtstate->do_icmp)
 	{
+		if (create_socket(trtstate, 0 /*do_tcp*/) == -1)
+			return;
+	}
+	else if (trtstate->do_udp)
+	{
+		if (create_socket(trtstate, 0 /*do_tcp*/) == -1)
+			return;
 		if (trtstate->do_v6)
 		{
-			memset(&loc_sa6, '\0', sizeof(loc_sa6));
-			loc_sa6.sin6_family= AF_INET;
-
-			r= connect(trtbase->v6icmp_snd,
-				(struct sockaddr *)&trtstate->sin6,
-				trtstate->socklen);
-#if 0
- { errno= ENOSYS; r= -1; }
-#endif
-			if (r == -1)
-			{
-				serrno= errno;
-
-				snprintf(line, sizeof(line),
-			", " DBQ(error) ":" DBQ(connect failed: %s) " }",
-					strerror(serrno));
-				add_str(trtstate, line);
-				report(trtstate);
-				return;
-			}
-			trtstate->loc_socklen= sizeof(trtstate->loc_sin6);
-			if (getsockname(trtbase->v6icmp_snd,
-				&trtstate->loc_sin6,
-				&trtstate->loc_socklen) == -1)
-			{
-				crondlog(DIE9 "getsockname failed");
-			}
-#if 0
-			printf("Got localname: %s\n",
-				inet_ntop(AF_INET6,
-				&trtstate->loc_sin6.sin6_addr,
-				buf, sizeof(buf)));
-#endif
+			trtstate->loc_sin6.sin6_port= htons(SRC_BASE_PORT +
+                                trtstate->index);
 		}
 		else
 		{
-			memset(&loc_sa4, '\0', sizeof(loc_sa4));
-			loc_sa4.sin_family= AF_INET;
-			((struct sockaddr_in *)&trtstate->sin6)->sin_port=
-				htons(0x8000);
-
-			r= connect(trtbase->v4icmp_snd,
-				(struct sockaddr *)&trtstate->sin6,
-				trtstate->socklen);
-#if 0
- { errno= ENOSYS; r= -1; }
-#endif
-			if (r == -1)
-			{
-				serrno= errno;
-
-				snprintf(line, sizeof(line),
-			", " DBQ(error) ":" DBQ(connect failed: %s) " }",
-					strerror(serrno));
-				add_str(trtstate, line);
-				report(trtstate);
-				return;
-			}
-			trtstate->loc_socklen= sizeof(trtstate->loc_sin6);
-			if (getsockname(trtbase->v4icmp_snd,
-				&trtstate->loc_sin6,
-				&trtstate->loc_socklen) == -1)
-			{
-				crondlog(DIE9 "getsockname failed");
-			}
-#if 0
-			printf("Got localname: %s\n",
-				inet_ntoa(((struct sockaddr_in *)
-				&trtstate->loc_sin6)->sin_addr));
-#endif
+			((struct sockaddr_in *)(&trtstate->loc_sin6))->
+				sin_port= htons(SRC_BASE_PORT +
+                                trtstate->index);
 		}
 	}
-	else
+	else if (trtstate->do_tcp)
 	{
+		if (create_socket(trtstate, 1 /*do_tcp*/) == -1)
+			return;
+
 		if (trtstate->do_v6)
 		{
-			int sock;
-
-			memset(&loc_sa6, '\0', sizeof(loc_sa6));
-			loc_sa6.sin6_family= AF_INET6;
-			loc_sa6.sin6_port= htons(SRC_BASE_PORT +
-				trtstate->index);;
-
-			sock= socket(AF_INET6, SOCK_DGRAM, 0);
-                        if (sock == -1)
-                        {
-                                crondlog(DIE9 "IPv6 socket failed");
-                        }
-			r= bind(sock, (struct sockaddr *)&loc_sa6,
-				sizeof(loc_sa6));
-			if (r == -1)
-			{
-				serrno= errno;
-
-				snprintf(line, sizeof(line),
-			", " DBQ(error) ":" DBQ(bind failed: %s) " }",
-					strerror(serrno));
-				add_str(trtstate, line);
-				report(trtstate);
-				close(sock);
-				return;
-			}
-
-			r= connect(sock, (struct sockaddr *)&trtstate->sin6,
-				trtstate->socklen);
-#if 0
- { errno= ENOSYS; r= -1; }
-#endif
-			if (r == -1)
-			{
-				serrno= errno;
-
-				snprintf(line, sizeof(line),
-			", " DBQ(error) ":" DBQ(connect failed: %s) " }",
-					strerror(serrno));
-				add_str(trtstate, line);
-				report(trtstate);
-				return;
-			}
-
-			trtstate->loc_socklen= sizeof(trtstate->loc_sin6);
-			if (getsockname(sock,
-				&trtstate->loc_sin6,
-				&trtstate->loc_socklen) == -1)
-			{
-				crondlog(DIE9 "getsockname failed");
-			}
-
-			close(sock);
-#if 0
-			printf("Got localname: %s:%d\n",
-				inet_ntop(AF_INET6,
-				&trtstate->loc_sin6.sin6_addr,
-				buf, sizeof(buf)),
-				ntohs(((struct sockaddr_in *)&trtstate->
-					loc_sin6)->sin_port));
-#endif
+			trtstate->loc_sin6.sin6_port= htons(SRC_BASE_PORT +
+                                trtstate->index);
 		}
 		else
 		{
-			int sock;
-
-			memset(&loc_sa4, '\0', sizeof(loc_sa4));
-			loc_sa4.sin_family= AF_INET;
-
-			loc_sa4.sin_port= htons(SRC_BASE_PORT +
-				trtstate->index);;
-
-			if (!trtstate->do_tcp)
-			{
-				/* Also set destination port */
-				((struct sockaddr_in *)&trtstate->sin6)->
-					sin_port= htons(BASE_PORT);
-			}
-
-			sock= socket(AF_INET, SOCK_DGRAM, 0);
-			if (sock == -1)
-			{
-				crondlog(DIE9 "IPv4 socket failed");
-			}
-			r= bind(sock, (struct sockaddr *)&loc_sa4,
-				sizeof(loc_sa4));
-#if 0
- { errno= ENOSYS; r= -1; }
-#endif
-			if (r == -1)
-			{
-				serrno= errno;
-
-				snprintf(line, sizeof(line),
-			", " DBQ(error) ":" DBQ(bind failed: %s) " }",
-					strerror(serrno));
-				add_str(trtstate, line);
-				report(trtstate);
-				close(sock);
-				return;
-			}
-
-			r= connect(sock, (struct sockaddr *) &trtstate->sin6,
-				trtstate->socklen);
-#if 0
- { errno= ENOSYS; r= -1; }
-#endif
-			if (r == -1)
-			{
-				serrno= errno;
-
-				snprintf(line, sizeof(line),
-			", " DBQ(error) ":" DBQ(connect failed: %s) " }",
-					strerror(serrno));
-				add_str(trtstate, line);
-				report(trtstate);
-				close(sock);
-				return;
-			}
-			trtstate->loc_socklen= sizeof(trtstate->loc_sin6);
-			if (getsockname(sock,
-				&trtstate->loc_sin6,
-				&trtstate->loc_socklen) == -1)
-			{
-				crondlog(DIE9 "getsockname failed");
-			}
-			close(sock);
-#if 0
-			printf("Got localname: %s:%d\n",
-				inet_ntoa(((struct sockaddr_in *)
-				&trtstate->loc_sin6)->sin_addr),
-				ntohs(((struct sockaddr_in *)&trtstate->
-					loc_sin6)->sin_port));
-#endif
+			((struct sockaddr_in *)(&trtstate->loc_sin6))->
+				sin_port= htons(SRC_BASE_PORT +
+                                trtstate->index);
 		}
 	}
 
 	add_str(trtstate, ", \"result\": [ ");
 
 	send_pkt(trtstate);
+}
+
+static int create_socket(struct trtstate *state, int do_tcp)
+{
+	int af, type, protocol;
+	int r, on, serrno;
+	char line[80];
+
+	af= (state->do_v6 ? AF_INET6 : AF_INET);
+	type= SOCK_RAW;
+	protocol= (af == AF_INET6 ? IPPROTO_ICMPV6 : IPPROTO_ICMP);
+
+	state->socket_icmp= xsocket(af, type, protocol);
+	if (state->socket_icmp == -1)
+	{
+		serrno= errno;
+
+		snprintf(line, sizeof(line),
+	", " DBQ(error) ":" DBQ(socket failed: %s) " }",
+			strerror(serrno));
+		add_str(state, line);
+		report(state);
+		return -1;
+	} 
+
+	if (state->interface)
+	{
+		if (bind_interface(state->socket_icmp,
+			af, state->interface) == -1)
+		{
+			snprintf(line, sizeof(line),
+	", " DBQ(error) ":" DBQ(bind_interface failed) " }");
+			add_str(state, line);
+			report(state);
+			return -1;
+		}
+	}
+
+	r= connect(state->socket_icmp,
+		(struct sockaddr *)&state->sin6,
+		state->socklen);
+#if 0
+ { errno= ENOSYS; r= -1; }
+#endif
+	if (r == -1)
+	{
+		serrno= errno;
+
+		snprintf(line, sizeof(line),
+	", " DBQ(error) ":" DBQ(connect failed: %s) " }",
+			strerror(serrno));
+		add_str(state, line);
+		report(state);
+		return -1;
+	}
+	state->loc_socklen= sizeof(state->loc_sin6);
+	if (getsockname(state->socket_icmp,
+		&state->loc_sin6,
+		&state->loc_socklen) == -1)
+	{
+		crondlog(DIE9 "getsockname failed");
+	}
+#if 0
+	printf("Got localname: %s\n",
+		inet_ntop(AF_INET6,
+		&state->loc_sin6.sin6_addr,
+		buf, sizeof(buf)));
+#endif
+
+	close(state->socket_icmp);
+	state->socket_icmp= xsocket(af, type,
+		protocol);
+	if (state->socket_icmp == -1)
+	{
+		serrno= errno;
+
+		snprintf(line, sizeof(line),
+	", " DBQ(error) ":" DBQ(socket failed: %s) " }",
+			strerror(serrno));
+		add_str(state, line);
+		report(state);
+		return -1;
+	} 
+
+	if (af == AF_INET6)
+	{
+		on = 1;
+		setsockopt(state->socket_icmp, IPPROTO_IPV6,
+			IPV6_RECVPKTINFO, &on, sizeof(on));
+
+		on = 1;
+		setsockopt(state->socket_icmp, IPPROTO_IPV6,
+			IPV6_RECVHOPLIMIT, &on, sizeof(on));
+	}
+
+	if (state->interface)
+	{
+		if (bind_interface(state->socket_icmp,
+			af, state->interface) == -1)
+		{
+			snprintf(line, sizeof(line),
+	", " DBQ(error) ":" DBQ(bind_interface failed) " }");
+			add_str(state, line);
+			report(state);
+			return -1;
+		}
+	}
+
+	event_assign(&state->event_icmp, state->base->event_base,
+		state->socket_icmp,
+		EV_READ | EV_PERSIST,
+		(af == AF_INET6 ? ready_callback6 : ready_callback4),
+		state);
+	event_add(&state->event_icmp, NULL);
+
+	if (do_tcp)
+	{
+		state->socket_tcp= xsocket(af, SOCK_RAW,
+			IPPROTO_TCP);
+		if (state->socket_tcp == -1)
+		{
+			serrno= errno;
+
+			snprintf(line, sizeof(line),
+		", " DBQ(error) ":" DBQ(socket failed: %s) " }",
+				strerror(serrno));
+			add_str(state, line);
+			report(state);
+			return -1;
+		} 
+
+		if (af == AF_INET6)
+		{
+			on = 1;
+			setsockopt(state->socket_tcp, IPPROTO_IPV6,
+				IPV6_RECVHOPLIMIT, &on, sizeof(on));
+		}
+
+		if (state->interface)
+		{
+			if (bind_interface(state->socket_tcp,
+				af, state->interface) == -1)
+			{
+				snprintf(line, sizeof(line),
+		", " DBQ(error) ":" DBQ(bind_interface failed) " }");
+				add_str(state, line);
+				report(state);
+				return -1;
+			}
+		}
+
+		r= connect(state->socket_tcp,
+			(struct sockaddr *)&state->sin6,
+			state->socklen);
+#if 0
+ { errno= ENOSYS; r= -1; }
+#endif
+		if (r == -1)
+		{
+			serrno= errno;
+
+			snprintf(line, sizeof(line),
+		", " DBQ(error) ":" DBQ(connect failed: %s) " }",
+				strerror(serrno));
+			add_str(state, line);
+			report(state);
+			return -1;
+		}
+
+		event_assign(&state->event_tcp, state->base->event_base,
+			state->socket_tcp,
+			EV_READ | EV_PERSIST,
+			(af == AF_INET6 ? ready_tcp6 : ready_tcp4),
+			state);
+		event_add(&state->event_tcp, NULL);
+	}
+
+	return 0;
 }
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
@@ -3935,6 +3970,8 @@ static int traceroute_delete(void *state)
 	trtstate->atlas= NULL;
 	free(trtstate->hostname);
 	trtstate->hostname= NULL;
+	free(trtstate->destportstr);
+	trtstate->destportstr= NULL;
 	free(trtstate->out_filename);
 	trtstate->out_filename= NULL;
 
