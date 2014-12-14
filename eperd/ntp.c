@@ -321,7 +321,7 @@ static void report(struct ntpstate *state)
 	else
 		fh= stdout;
 
-	fprintf(fh, "RESULT { ");
+	fprintf(fh, "{ ");
 	if (state->atlas)
 	{
 		fprintf(fh, DBQ(id) ":" DBQ(%s)

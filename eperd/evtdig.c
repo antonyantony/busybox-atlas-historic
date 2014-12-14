@@ -1963,7 +1963,7 @@ static void tdig_stats(int unusg_statsed UNUSED_PARAM, const short event UNUSED_
 
 	qry=xzalloc(sizeof(*qry));
 
-	AS("RESULT { ");
+	AS("{ ");
 	JS(id, "9201" ); 
 	fw = get_atlas_fw_version();
 	JU(fw, fw);
@@ -2154,7 +2154,7 @@ void printErrorQuick (struct query_state *qry)
 	else
 		fh = stdout;
 
-	fprintf(fh, "RESULT { ");
+	fprintf(fh, "{ ");
 	fprintf(fh, "\"fw\" : \"%d\",", get_atlas_fw_version());
 	fprintf(fh, "\"id\" : 9202 ,");
 	gettimeofday(&now, NULL);
@@ -2204,7 +2204,7 @@ void printReply(struct query_state *qry, int wire_size, unsigned char *result)
 	if(! qry->result.size){
 		buf_init(&qry->result, -1);
 
-		AS("RESULT { ");
+		AS("{ ");
 
 		if(qry->str_Atlas) 
 		{
