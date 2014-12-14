@@ -94,6 +94,7 @@ lib-y += skip_whitespace.o
 lib-y += speed_table.o
 lib-y += str_tolower.o
 lib-y += strrstr.o
+lib-y += sysconf.o
 lib-y += time.o
 lib-y += trim.o
 lib-y += u_signal_names.o
@@ -153,6 +154,7 @@ lib-$(CONFIG_VLOCK) += pw_encrypt.o correct_password.o
 lib-$(CONFIG_SU) += pw_encrypt.o correct_password.o
 lib-$(CONFIG_LOGIN) += pw_encrypt.o correct_password.o
 lib-$(CONFIG_FEATURE_HTTPD_AUTH_MD5) += pw_encrypt.o
+lib-$(CONFIG_FEATURE_FTP_AUTHENTICATION) += pw_encrypt.o
 
 lib-$(CONFIG_DF) += find_mount_point.o
 lib-$(CONFIG_MKFS_MINIX) += find_mount_point.o
@@ -189,3 +191,6 @@ lib-$(CONFIG_PGREP) += xregcomp.o
 lib-$(CONFIG_PKILL) += xregcomp.o
 lib-$(CONFIG_DEVFSD) += xregcomp.o
 lib-$(CONFIG_FEATURE_FIND_REGEX) += xregcomp.o
+
+# Add the experimental logging functionality, only used by zcip
+lib-$(CONFIG_ZCIP) += logenv.o
