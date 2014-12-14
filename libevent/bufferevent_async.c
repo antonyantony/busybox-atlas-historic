@@ -217,7 +217,7 @@ bev_async_consider_writing(struct bufferevent_async *beva)
 	    &beva->write_overlapped)) {
 		bufferevent_decref_(bev);
 		beva->ok = 0;
-		bufferevent_run_eventcb_(bev, BEV_EVENT_ERROR);
+		bufferevent_run_eventcb_(bev, BEV_EVENT_ERROR, 0);
 	} else {
 		beva->write_in_progress = at_most;
 		bufferevent_decrement_write_buckets_(&beva->bev, at_most);
@@ -270,7 +270,7 @@ bev_async_consider_reading(struct bufferevent_async *beva)
 	bufferevent_incref_(bev);
 	if (evbuffer_launch_read_(bev->input, at_most, &beva->read_overlapped)) {
 		beva->ok = 0;
-		bufferevent_run_eventcb_(bev, BEV_EVENT_ERROR);
+		bufferevent_run_eventcb_(bev, BEV_EVENT_ERROR, 0);
 		bufferevent_decref_(bev);
 	} else {
 		beva->read_in_progress = at_most;
@@ -381,9 +381,10 @@ be_async_destruct(struct bufferevent *bev)
 	bev_async_del_write(bev_async);
 
 	fd = evbuffer_overlapped_get_fd_(bev->input);
-	if (bev_p->options & BEV_OPT_CLOSE_ON_FREE) {
-		/* XXXX possible double-close */
+	if (fd != (evutil_socket_t)INVALID_SOCKET &&
+		(bev_p->options & BEV_OPT_CLOSE_ON_FREE)) {
 		evutil_closesocket(fd);
+		evbuffer_overlapped_set_fd_(bev->input, INVALID_SOCKET);
 	}
 }
 
@@ -428,7 +429,7 @@ connect_complete(struct event_overlapped *eo, ev_uintptr_t key,
 		bev_async_set_wsa_error(bev, eo);
 
 	bufferevent_run_eventcb_(bev,
-			ok? BEV_EVENT_CONNECTED : BEV_EVENT_ERROR);
+			ok? BEV_EVENT_CONNECTED : BEV_EVENT_ERROR, 0);
 
 	event_base_del_virtual_(bev->ev_base);
 
@@ -458,17 +459,16 @@ read_complete(struct event_overlapped *eo, ev_uintptr_t key,
 	if (bev_a->ok) {
 		if (ok && nbytes) {
 			BEV_RESET_GENERIC_READ_TIMEOUT(bev);
-			if (evbuffer_get_length(bev->input) >= bev->wm_read.low)
-				bufferevent_run_readcb_(bev);
+			bufferevent_trigger_nolock_(bev, EV_READ, 0);
 			bev_async_consider_reading(bev_a);
 		} else if (!ok) {
 			what |= BEV_EVENT_ERROR;
 			bev_a->ok = 0;
-			bufferevent_run_eventcb_(bev, what);
+			bufferevent_run_eventcb_(bev, what, 0);
 		} else if (!nbytes) {
 			what |= BEV_EVENT_EOF;
 			bev_a->ok = 0;
-			bufferevent_run_eventcb_(bev, what);
+			bufferevent_run_eventcb_(bev, what, 0);
 		}
 	}
 
@@ -502,18 +502,16 @@ write_complete(struct event_overlapped *eo, ev_uintptr_t key,
 	if (bev_a->ok) {
 		if (ok && nbytes) {
 			BEV_RESET_GENERIC_WRITE_TIMEOUT(bev);
-			if (evbuffer_get_length(bev->output) <=
-			    bev->wm_write.low)
-				bufferevent_run_writecb_(bev);
+			bufferevent_trigger_nolock_(bev, EV_WRITE, 0);
 			bev_async_consider_writing(bev_a);
 		} else if (!ok) {
 			what |= BEV_EVENT_ERROR;
 			bev_a->ok = 0;
-			bufferevent_run_eventcb_(bev, what);
+			bufferevent_run_eventcb_(bev, what, 0);
 		} else if (!nbytes) {
 			what |= BEV_EVENT_EOF;
 			bev_a->ok = 0;
-			bufferevent_run_eventcb_(bev, what);
+			bufferevent_run_eventcb_(bev, what, 0);
 		}
 	}
 
@@ -567,9 +565,9 @@ bufferevent_async_new_(struct event_base *base,
 	event_overlapped_init_(&bev_a->read_overlapped, read_complete);
 	event_overlapped_init_(&bev_a->write_overlapped, write_complete);
 
+	bufferevent_init_generic_timeout_cbs_(bev);
+
 	bev_a->ok = fd >= 0;
-	if (bev_a->ok)
-		bufferevent_init_generic_timeout_cbs_(bev);
 
 	return bev;
 err:
@@ -674,6 +672,7 @@ be_async_ctrl(struct bufferevent *bev, enum bufferevent_ctrl_op op,
 		if (fd != (evutil_socket_t)INVALID_SOCKET &&
 		    (bev_a->bev.options & BEV_OPT_CLOSE_ON_FREE)) {
 			closesocket(fd);
+			evbuffer_overlapped_set_fd_(bev->input, INVALID_SOCKET);
 		}
 		bev_a->ok = 0;
 		return 0;

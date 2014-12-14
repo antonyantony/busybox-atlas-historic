@@ -364,8 +364,6 @@ evhttp_write_buffer(struct evhttp_connection *evcon,
 	evcon->cb = cb;
 	evcon->cb_arg = arg;
 
-	bufferevent_enable(evcon->bufev, EV_WRITE);
-
 	/* Disable the read callback: we don't actually care about data;
 	 * we only care about close detection.  (We don't disable reading,
 	 * since we *do* want to learn about any close events.) */
@@ -374,6 +372,8 @@ evhttp_write_buffer(struct evhttp_connection *evcon,
 	    evhttp_write_cb,
 	    evhttp_error_cb,
 	    evcon);
+
+	bufferevent_enable(evcon->bufev, EV_WRITE);
 }
 
 static void
@@ -552,9 +552,11 @@ evhttp_make_header_response(struct evhttp_connection *evcon,
 	/* Potentially add headers for unidentified content. */
 	if (evhttp_response_needs_body(req)) {
 		if (evhttp_find_header(req->output_headers,
-			"Content-Type") == NULL) {
+			"Content-Type") == NULL
+		    && evcon->http_server->default_content_type) {
 			evhttp_add_header(req->output_headers,
-			    "Content-Type", "text/html; charset=ISO-8859-1");
+			    "Content-Type",
+			    evcon->http_server->default_content_type);
 		}
 	}
 
@@ -767,6 +769,7 @@ evhttp_connection_done(struct evhttp_connection *evcon)
 {
 	struct evhttp_request *req = TAILQ_FIRST(&evcon->requests);
 	int con_outgoing = evcon->flags & EVHTTP_CON_OUTGOING;
+	int free_evcon = 0;
 
 	if (con_outgoing) {
 		/* idle or close the connection */
@@ -799,6 +802,12 @@ evhttp_connection_done(struct evhttp_connection *evcon)
 			 * need to detect if the other side closes it.
 			 */
 			evhttp_connection_start_detectclose(evcon);
+		} else if ((evcon->flags & EVHTTP_CON_AUTOFREE)) {
+			/*
+			 * If we have no more requests that need completion
+			 * and we're not waiting for the connection to close
+			 */
+			 free_evcon = 1;
 		}
 	} else {
 		/*
@@ -816,6 +825,16 @@ evhttp_connection_done(struct evhttp_connection *evcon)
 	 */
 	if (con_outgoing && ((req->flags & EVHTTP_USER_OWNED) == 0)) {
 		evhttp_request_free(req);
+	}
+
+	/* If this was the last request of an outgoing connection and we're
+	 * not waiting to receive a connection close event and we want to
+	 * automatically free the connection. We check to ensure our request
+	 * list is empty one last time just in case our callback added a
+	 * new request.
+	 */
+	if (free_evcon && TAILQ_FIRST(&evcon->requests) == NULL) {
+		evhttp_connection_free(evcon);
 	}
 }
 
@@ -1155,7 +1174,9 @@ evhttp_connection_free(struct evhttp_connection *evcon)
 
 	if (evcon->fd != -1) {
 		shutdown(evcon->fd, EVUTIL_SHUT_WR);
-		evutil_closesocket(evcon->fd);
+		if (!(bufferevent_get_options_(evcon->bufev) & BEV_OPT_CLOSE_ON_FREE)) {
+			evutil_closesocket(evcon->fd);
+		}
 	}
 
 	if (evcon->bind_address != NULL)
@@ -1164,7 +1185,15 @@ evhttp_connection_free(struct evhttp_connection *evcon)
 	if (evcon->address != NULL)
 		mm_free(evcon->address);
 
+	if (evcon->conn_address != NULL)
+		mm_free(evcon->conn_address);
+
 	mm_free(evcon);
+}
+
+void
+evhttp_connection_free_on_completion(struct evhttp_connection *evcon) {
+	evcon->flags |= EVHTTP_CON_AUTOFREE;
 }
 
 void
@@ -1236,6 +1265,7 @@ evhttp_connection_reset_(struct evhttp_connection *evcon)
 
 		shutdown(evcon->fd, EVUTIL_SHUT_WR);
 		evutil_closesocket(evcon->fd);
+		bufferevent_setfd(evcon->bufev, -1);
 		evcon->fd = -1;
 	}
 
@@ -1278,6 +1308,7 @@ evhttp_connection_cb_cleanup(struct evhttp_connection *evcon)
 {
 	struct evcon_requestq requests;
 
+	evhttp_connection_reset_(evcon);
 	if (evcon->retry_max < 0 || evcon->retry_cnt < evcon->retry_max) {
 		struct timeval tv_retry = evcon->initial_retry_timeout;
 		int i;
@@ -1299,7 +1330,6 @@ evhttp_connection_cb_cleanup(struct evhttp_connection *evcon)
 		evcon->retry_cnt++;
 		return;
 	}
-	evhttp_connection_reset_(evcon);
 
 	/*
 	 * User callback can do evhttp_make_request() on the same
@@ -1378,6 +1408,17 @@ evhttp_error_cb(struct bufferevent *bufev, short what, void *arg)
 		 */
 		EVUTIL_ASSERT(evcon->state == EVCON_IDLE);
 		evhttp_connection_reset_(evcon);
+
+		/*
+		 * If we have no more requests that need completion
+		 * and we want to auto-free the connection when all
+		 * requests have been completed.
+		 */
+		if (TAILQ_FIRST(&evcon->requests) == NULL
+		  && (evcon->flags & EVHTTP_CON_OUTGOING)
+		  && (evcon->flags & EVHTTP_CON_AUTOFREE)) {
+			evhttp_connection_free(evcon);
+		}
 		return;
 	}
 
@@ -1400,6 +1441,7 @@ evhttp_connection_cb(struct bufferevent *bufev, short what, void *arg)
 	struct evhttp_connection *evcon = arg;
 	int error;
 	ev_socklen_t errsz = sizeof(error);
+	socklen_t conn_address_len = sizeof(*evcon->conn_address);
 
 	if (evcon->fd == -1)
 		evcon->fd = bufferevent_getfd(bufev);
@@ -1415,6 +1457,12 @@ evhttp_connection_cb(struct bufferevent *bufev, short what, void *arg)
 #endif
 		evhttp_error_cb(bufev, what, arg);
 		return;
+	}
+
+	if (evcon->fd == -1) {
+		event_debug(("%s: bufferevent_getfd returned -1",
+			__func__));
+		goto cleanup;
 	}
 
 	/* Check if the connection completed */
@@ -1443,6 +1491,14 @@ evhttp_connection_cb(struct bufferevent *bufev, short what, void *arg)
 	/* Reset the retry count as we were successful in connecting */
 	evcon->retry_cnt = 0;
 	evcon->state = EVCON_IDLE;
+
+	if (!evcon->conn_address) {
+		evcon->conn_address = mm_malloc(sizeof(*evcon->conn_address));
+	}
+	if (getpeername(evcon->fd, (struct sockaddr *)evcon->conn_address, &conn_address_len)) {
+		mm_free(evcon->conn_address);
+		evcon->conn_address = NULL;
+	}
 
 	/* reset the bufferevent cbs */
 	bufferevent_setcb(evcon->bufev,
@@ -2128,6 +2184,14 @@ evhttp_read_header(struct evhttp_connection *evcon,
 	/* Disable reading for now */
 	bufferevent_disable(evcon->bufev, EV_READ);
 
+	/* Callback can shut down connection with negative return value */
+	if (req->header_cb != NULL) {
+		if ((*req->header_cb)(req, req->cb_arg) < 0) {
+			evhttp_connection_fail_(evcon, EVREQ_HTTP_EOF);
+			return;
+		}
+	}
+
 	/* Done reading headers, do the real work */
 	switch (req->kind) {
 	case EVHTTP_REQUEST:
@@ -2237,6 +2301,7 @@ evhttp_connection_base_bufferevent_new(struct event_base *base, struct evdns_bas
 	    evhttp_deferred_read_cb, evcon);
 
 	evcon->dns_base = dnsbase;
+	evcon->ai_family = AF_UNSPEC;
 
 	return (evcon);
 
@@ -2251,11 +2316,23 @@ struct bufferevent* evhttp_connection_get_bufferevent(struct evhttp_connection *
 	return evcon->bufev;
 }
 
+struct evhttp *
+evhttp_connection_get_server(struct evhttp_connection *evcon)
+{
+	return evcon->http_server;
+}
+
 struct evhttp_connection *
 evhttp_connection_base_new(struct event_base *base, struct evdns_base *dnsbase,
     const char *address, unsigned short port)
 {
 	return evhttp_connection_base_bufferevent_new(base, dnsbase, NULL, address, port);
+}
+
+void evhttp_connection_set_family(struct evhttp_connection *evcon,
+	int family)
+{
+	evcon->ai_family = family;
 }
 
 void
@@ -2332,6 +2409,12 @@ evhttp_connection_get_peer(struct evhttp_connection *evcon,
 	*port = evcon->port;
 }
 
+const struct sockaddr*
+evhttp_connection_get_addr(struct evhttp_connection *evcon)
+{
+	return (struct sockaddr *)evcon->conn_address;
+}
+
 int
 evhttp_connection_connect_(struct evhttp_connection *evcon)
 {
@@ -2377,7 +2460,7 @@ evhttp_connection_connect_(struct evhttp_connection *evcon)
 	evcon->state = EVCON_CONNECTING;
 
 	if (bufferevent_socket_connect_hostname(evcon->bufev, evcon->dns_base,
-		AF_UNSPEC, evcon->address, evcon->port) < 0) {
+		evcon->ai_family, evcon->address, evcon->port) < 0) {
 		evcon->state = old_state;
 		event_sock_warn(evcon->fd, "%s: connection to \"%s\" failed",
 		    __func__, evcon->address);
@@ -2510,6 +2593,10 @@ evhttp_send_done(struct evhttp_connection *evcon, void *arg)
 	struct evhttp_request *req = TAILQ_FIRST(&evcon->requests);
 	TAILQ_REMOVE(&evcon->requests, req, next);
 
+	if (req->on_complete_cb != NULL) {
+		req->on_complete_cb(req, req->on_complete_cb_arg);
+	}
+
 	need_close =
 	    (REQ_VERSION_BEFORE(req, 1, 1) &&
 		!evhttp_is_connection_keepalive(req->input_headers))||
@@ -2624,7 +2711,8 @@ evhttp_send_reply_start(struct evhttp_request *req, int code,
 }
 
 void
-evhttp_send_reply_chunk(struct evhttp_request *req, struct evbuffer *databuf)
+evhttp_send_reply_chunk_with_cb(struct evhttp_request *req, struct evbuffer *databuf,
+    void (*cb)(struct evhttp_connection *, void *), void *arg)
 {
 	struct evhttp_connection *evcon = req->evcon;
 	struct evbuffer *output;
@@ -2646,9 +2734,14 @@ evhttp_send_reply_chunk(struct evhttp_request *req, struct evbuffer *databuf)
 	if (req->chunked) {
 		evbuffer_add(output, "\r\n", 2);
 	}
-	evhttp_write_buffer(evcon, NULL, NULL);
+	evhttp_write_buffer(evcon, cb, arg);
 }
 
+void
+evhttp_send_reply_chunk(struct evhttp_request *req, struct evbuffer *databuf)
+{
+	evhttp_send_reply_chunk_with_cb(req, databuf, NULL, NULL);
+}
 void
 evhttp_send_reply_end(struct evhttp_request *req)
 {
@@ -3375,6 +3468,7 @@ evhttp_new_object(void)
 	evutil_timerclear(&http->timeout);
 	evhttp_set_max_headers_size(http, EV_SIZE_MAX);
 	evhttp_set_max_body_size(http, EV_SIZE_MAX);
+	evhttp_set_default_content_type(http, "text/html; charset=ISO-8859-1");
 	evhttp_set_allowed_methods(http,
 	    EVHTTP_REQ_GET |
 	    EVHTTP_REQ_POST |
@@ -3582,6 +3676,12 @@ evhttp_set_max_body_size(struct evhttp* http, ev_ssize_t max_body_size)
 }
 
 void
+evhttp_set_default_content_type(struct evhttp *http,
+	const char *content_type) {
+	http->default_content_type = content_type;
+}
+
+void
 evhttp_set_allowed_methods(struct evhttp* http, ev_uint16_t methods)
 {
 	http->allowed_methods = methods;
@@ -3772,10 +3872,25 @@ evhttp_request_set_chunked_cb(struct evhttp_request *req,
 }
 
 void
+evhttp_request_set_header_cb(struct evhttp_request *req,
+    int (*cb)(struct evhttp_request *, void *))
+{
+	req->header_cb = cb;
+}
+
+void
 evhttp_request_set_error_cb(struct evhttp_request *req,
     void (*cb)(enum evhttp_request_error, void *))
 {
 	req->error_cb = cb;
+}
+
+void
+evhttp_request_set_on_complete_cb(struct evhttp_request *req,
+    void (*cb)(struct evhttp_request *, void *), void *cb_arg)
+{
+	req->on_complete_cb = cb;
+	req->on_complete_cb_arg = cb_arg;
 }
 
 /*
@@ -4214,6 +4329,8 @@ parse_port(const char *s, const char *eos)
 			return -1;
 		portnum = (portnum * 10) + (*s - '0');
 		if (portnum < 0)
+			return -1;
+		if (portnum > 65535)
 			return -1;
 		++s;
 	}

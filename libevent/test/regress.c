@@ -944,17 +944,18 @@ signal_cb(evutil_socket_t fd, short event, void *arg)
 }
 
 static void
-test_simplesignal(void)
+test_simplesignal_impl(int find_reorder)
 {
 	struct event ev;
 	struct itimerval itv;
 
-	setup_test("Simple signal: ");
 	evsignal_set(&ev, SIGALRM, signal_cb, &ev);
 	evsignal_add(&ev, NULL);
 	/* find bugs in which operations are re-ordered */
-	evsignal_del(&ev);
-	evsignal_add(&ev, NULL);
+	if (find_reorder) {
+		evsignal_del(&ev);
+		evsignal_add(&ev, NULL);
+	}
 
 	memset(&itv, 0, sizeof(itv));
 	itv.it_value.tv_sec = 0;
@@ -968,6 +969,20 @@ test_simplesignal(void)
 		test_ok = 0;
 
 	cleanup_test();
+}
+
+static void
+test_simplestsignal(void)
+{
+	setup_test("Simplest one signal: ");
+	test_simplesignal_impl(0);
+}
+
+static void
+test_simplesignal(void)
+{
+	setup_test("Simple signal: ");
+	test_simplesignal_impl(1);
 }
 
 static void
@@ -1312,6 +1327,274 @@ test_event_assign_selfarg(void *ptr)
 }
 
 static void
+test_event_base_get_num_events(void *ptr)
+{
+	struct basic_test_data *data = ptr;
+	struct event_base *base = data->base;
+	struct event ev;
+	int event_count_active;
+	int event_count_virtual;
+	int event_count_added;
+	int event_count_active_virtual;
+	int event_count_active_added;
+	int event_count_virtual_added;
+	int event_count_active_added_virtual;
+
+	struct timeval qsec = {0, 100000};
+
+	event_assign(&ev, base, -1, EV_READ, event_selfarg_cb,
+	    event_self_cbarg());
+
+	event_add(&ev, &qsec);
+	event_count_active = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE);
+	event_count_virtual = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL);
+	event_count_added = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ADDED);
+	event_count_active_virtual = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_VIRTUAL);
+	event_count_active_added = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_ADDED);
+	event_count_virtual_added = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL|EVENT_BASE_COUNT_ADDED);
+	event_count_active_added_virtual = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE|
+	    EVENT_BASE_COUNT_ADDED|
+	    EVENT_BASE_COUNT_VIRTUAL);
+	tt_int_op(event_count_active, ==, 0);
+	tt_int_op(event_count_virtual, ==, 0);
+	/* libevent itself adds a timeout event, so the event_count is 2 here */
+	tt_int_op(event_count_added, ==, 2);
+	tt_int_op(event_count_active_virtual, ==, 0);
+	tt_int_op(event_count_active_added, ==, 2);
+	tt_int_op(event_count_virtual_added, ==, 2);
+	tt_int_op(event_count_active_added_virtual, ==, 2);
+
+	event_active(&ev, EV_READ, 1);
+	event_count_active = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE);
+	event_count_virtual = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL);
+	event_count_added = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ADDED);
+	event_count_active_virtual = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_VIRTUAL);
+	event_count_active_added = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_ADDED);
+	event_count_virtual_added = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL|EVENT_BASE_COUNT_ADDED);
+	event_count_active_added_virtual = event_base_get_num_events(base,
+	    EVENT_BASE_COUNT_ACTIVE|
+	    EVENT_BASE_COUNT_ADDED|
+	    EVENT_BASE_COUNT_VIRTUAL);
+	tt_int_op(event_count_active, ==, 1);
+	tt_int_op(event_count_virtual, ==, 0);
+	tt_int_op(event_count_added, ==, 3);
+	tt_int_op(event_count_active_virtual, ==, 1);
+	tt_int_op(event_count_active_added, ==, 4);
+	tt_int_op(event_count_virtual_added, ==, 3);
+	tt_int_op(event_count_active_added_virtual, ==, 4);
+
+       event_base_loop(base, 0);
+       event_count_active = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE);
+       event_count_virtual = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_VIRTUAL);
+       event_count_added = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ADDED);
+       event_count_active_virtual = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_VIRTUAL);
+       event_count_active_added = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_ADDED);
+       event_count_virtual_added = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_VIRTUAL|EVENT_BASE_COUNT_ADDED);
+       event_count_active_added_virtual = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE|
+	   EVENT_BASE_COUNT_ADDED|
+	   EVENT_BASE_COUNT_VIRTUAL);
+       tt_int_op(event_count_active, ==, 0);
+       tt_int_op(event_count_virtual, ==, 0);
+       tt_int_op(event_count_added, ==, 0);
+       tt_int_op(event_count_active_virtual, ==, 0);
+       tt_int_op(event_count_active_added, ==, 0);
+       tt_int_op(event_count_virtual_added, ==, 0);
+       tt_int_op(event_count_active_added_virtual, ==, 0);
+
+       event_base_add_virtual_(base);
+       event_count_active = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE);
+       event_count_virtual = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_VIRTUAL);
+       event_count_added = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ADDED);
+       event_count_active_virtual = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_VIRTUAL);
+       event_count_active_added = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE|EVENT_BASE_COUNT_ADDED);
+       event_count_virtual_added = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_VIRTUAL|EVENT_BASE_COUNT_ADDED);
+       event_count_active_added_virtual = event_base_get_num_events(base,
+	   EVENT_BASE_COUNT_ACTIVE|
+	   EVENT_BASE_COUNT_ADDED|
+	   EVENT_BASE_COUNT_VIRTUAL);
+       tt_int_op(event_count_active, ==, 0);
+       tt_int_op(event_count_virtual, ==, 1);
+       tt_int_op(event_count_added, ==, 0);
+       tt_int_op(event_count_active_virtual, ==, 1);
+       tt_int_op(event_count_active_added, ==, 0);
+       tt_int_op(event_count_virtual_added, ==, 1);
+       tt_int_op(event_count_active_added_virtual, ==, 1);
+
+end:
+       ;
+}
+
+static void
+test_event_base_get_max_events(void *ptr)
+{
+	struct basic_test_data *data = ptr;
+	struct event_base *base = data->base;
+	struct event ev;
+	struct event ev2;
+	int event_count_active;
+	int event_count_virtual;
+	int event_count_added;
+	int event_count_active_virtual;
+	int event_count_active_added;
+	int event_count_virtual_added;
+	int event_count_active_added_virtual;
+
+	struct timeval qsec = {0, 100000};
+
+	event_assign(&ev, base, -1, EV_READ, event_selfarg_cb,
+	    event_self_cbarg());
+	event_assign(&ev2, base, -1, EV_READ, event_selfarg_cb,
+	    event_self_cbarg());
+
+	event_add(&ev, &qsec);
+	event_add(&ev2, &qsec);
+	event_del(&ev2);
+
+	event_count_active = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE, 0);
+	event_count_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ADDED, 0);
+	event_count_active_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_active_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_virtual_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_active_added_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE |
+	    EVENT_BASE_COUNT_ADDED |
+	    EVENT_BASE_COUNT_VIRTUAL, 0);
+
+	tt_int_op(event_count_active, ==, 0);
+	tt_int_op(event_count_virtual, ==, 0);
+	/* libevent itself adds a timeout event, so the event_count is 4 here */
+	tt_int_op(event_count_added, ==, 4);
+	tt_int_op(event_count_active_virtual, ==, 0);
+	tt_int_op(event_count_active_added, ==, 4);
+	tt_int_op(event_count_virtual_added, ==, 4);
+	tt_int_op(event_count_active_added_virtual, ==, 4);
+
+	event_active(&ev, EV_READ, 1);
+	event_count_active = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE, 0);
+	event_count_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ADDED, 0);
+	event_count_active_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_active_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_virtual_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_active_added_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE |
+	    EVENT_BASE_COUNT_ADDED |
+	    EVENT_BASE_COUNT_VIRTUAL, 0);
+
+	tt_int_op(event_count_active, ==, 1);
+	tt_int_op(event_count_virtual, ==, 0);
+	tt_int_op(event_count_added, ==, 4);
+	tt_int_op(event_count_active_virtual, ==, 1);
+	tt_int_op(event_count_active_added, ==, 5);
+	tt_int_op(event_count_virtual_added, ==, 4);
+	tt_int_op(event_count_active_added_virtual, ==, 5);
+
+	event_base_loop(base, 0);
+	event_count_active = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE, 1);
+	event_count_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL, 1);
+	event_count_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ADDED, 1);
+	event_count_active_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_active_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_virtual_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_active_added_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE |
+	    EVENT_BASE_COUNT_ADDED |
+	    EVENT_BASE_COUNT_VIRTUAL, 1);
+
+	tt_int_op(event_count_active, ==, 1);
+	tt_int_op(event_count_virtual, ==, 0);
+	tt_int_op(event_count_added, ==, 4);
+	tt_int_op(event_count_active_virtual, ==, 0);
+	tt_int_op(event_count_active_added, ==, 0);
+	tt_int_op(event_count_virtual_added, ==, 0);
+	tt_int_op(event_count_active_added_virtual, ==, 0);
+
+	event_count_active = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE, 0);
+	event_count_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ADDED, 0);
+	tt_int_op(event_count_active, ==, 0);
+	tt_int_op(event_count_virtual, ==, 0);
+	tt_int_op(event_count_added, ==, 0);
+
+	event_base_add_virtual_(base);
+	event_count_active = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE, 0);
+	event_count_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ADDED, 0);
+	event_count_active_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_VIRTUAL, 0);
+	event_count_active_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_virtual_added = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_VIRTUAL | EVENT_BASE_COUNT_ADDED, 0);
+	event_count_active_added_virtual = event_base_get_max_events(base,
+	    EVENT_BASE_COUNT_ACTIVE |
+	    EVENT_BASE_COUNT_ADDED |
+	    EVENT_BASE_COUNT_VIRTUAL, 0);
+
+	tt_int_op(event_count_active, ==, 0);
+	tt_int_op(event_count_virtual, ==, 1);
+	tt_int_op(event_count_added, ==, 0);
+	tt_int_op(event_count_active_virtual, ==, 1);
+	tt_int_op(event_count_active_added, ==, 0);
+	tt_int_op(event_count_virtual_added, ==, 1);
+	tt_int_op(event_count_active_added_virtual, ==, 1);
+
+end:
+       ;
+}
+
+static void
 test_bad_assign(void *ptr)
 {
 	struct event ev;
@@ -1390,7 +1673,7 @@ static void
 test_active_later(void *ptr)
 {
 	struct basic_test_data *data = ptr;
-	struct event *ev1, *ev2;
+	struct event *ev1 = NULL, *ev2 = NULL;
 	struct event ev3, ev4;
 	struct timeval qsec = {0, 100000};
 	ev1 = event_new(data->base, data->pair[0], EV_READ|EV_PERSIST, read_and_drain_cb, NULL);
@@ -1425,10 +1708,15 @@ test_active_later(void *ptr)
 	 * it. */
 	event_active_later_(&ev3, EV_READ);
 	event_base_assert_ok_(data->base);
+
+end:
+	if (ev1)
+		event_free(ev1);
+	if (ev2)
+		event_free(ev2);
+
 	event_base_free(data->base);
 	data->base = NULL;
-end:
-	;
 }
 
 
@@ -1449,7 +1737,7 @@ static void send_a_byte_cb(evutil_socket_t fd, short what, void *arg)
 {
 	evutil_socket_t *sockp = arg;
 	(void) fd; (void) what;
-	write(*sockp, "A", 1);
+	(void) write(*sockp, "A", 1);
 }
 struct read_not_timeout_param
 {
@@ -1461,11 +1749,15 @@ static void read_not_timeout_cb(evutil_socket_t fd, short what, void *arg)
 {
 	struct read_not_timeout_param *rntp = arg;
 	char c;
+	ev_ssize_t n;
 	(void) fd; (void) what;
-	read(fd, &c, 1);
+	n = read(fd, &c, 1);
+	tt_int_op(n, ==, 1);
 	rntp->events |= what;
 	++rntp->count;
 	if(2 == rntp->count) event_del(rntp->ev[0]);
+end:
+	;
 }
 
 static void
@@ -1666,14 +1958,20 @@ re_add_read_cb(evutil_socket_t fd, short event, void *arg)
 {
 	char buf[256];
 	struct event *ev_other = arg;
+	ev_ssize_t n_read;
+
 	readd_test_event_last_added = ev_other;
 
-	if (read(fd, buf, sizeof(buf)) < 0) {
-		tt_fail_perror("read");
-	}
+	n_read = read(fd, buf, sizeof(buf));
 
-	event_add(ev_other, NULL);
-	++test_ok;
+	if (n_read < 0) {
+		tt_fail_perror("read");
+		event_base_loopbreak(event_get_base(ev_other));
+		return;
+	} else {
+		event_add(ev_other, NULL);
+		++test_ok;
+	}
 }
 
 static void
@@ -2003,7 +2301,7 @@ evtag_fuzz(void *ptr)
 
 	for (j = 0; j < 100; j++) {
 		for (i = 0; i < (int)sizeof(buffer); i++)
-			buffer[i] = rand();
+			buffer[i] = test_weakrand();
 		evbuffer_drain(tmp, -1);
 		evbuffer_add(tmp, buffer, sizeof(buffer));
 
@@ -2792,6 +3090,7 @@ test_gettimeofday_cached(void *arg)
 		event_config_set_flag(cfg, EVENT_BASE_FLAG_NO_CACHE_TIME);
 	}
 	cached_time_base = base = event_base_new_with_config(cfg);
+	tt_assert(base);
 
 	/* Try gettimeofday_cached outside of an event loop. */
 	evutil_gettimeofday(&now, NULL);
@@ -2837,6 +3136,97 @@ end:
 		event_config_free(cfg);
 }
 
+static void
+tabf_cb(evutil_socket_t fd, short what, void *arg)
+{
+	int *ptr = arg;
+	*ptr = what;
+	*ptr += 0x10000;
+}
+
+static void
+test_active_by_fd(void *arg)
+{
+	struct basic_test_data *data = arg;
+	struct event_base *base = data->base;
+	struct event *ev1 = NULL, *ev2 = NULL, *ev3 = NULL, *ev4 = NULL;
+	int e1,e2,e3,e4;
+#ifndef _WIN32
+	struct event *evsig = NULL;
+	int es;
+#endif
+	struct timeval tenmin = { 600, 0 };
+
+	/* Ensure no crash on nonexistent FD. */
+	event_base_active_by_fd(base, 1000, EV_READ);
+
+	/* Ensure no crash on bogus FD. */
+	event_base_active_by_fd(base, -1, EV_READ);
+
+	/* Ensure no crash on nonexistent/bogus signal. */
+	event_base_active_by_signal(base, 1000);
+	event_base_active_by_signal(base, -1);
+
+	event_base_assert_ok_(base);
+
+	e1 = e2 = e3 = e4 = 0;
+	ev1 = event_new(base, data->pair[0], EV_READ, tabf_cb, &e1);
+	ev2 = event_new(base, data->pair[0], EV_WRITE, tabf_cb, &e2);
+	ev3 = event_new(base, data->pair[1], EV_READ, tabf_cb, &e3);
+	ev4 = event_new(base, data->pair[1], EV_READ, tabf_cb, &e4);
+	tt_assert(ev1);
+	tt_assert(ev2);
+	tt_assert(ev3);
+	tt_assert(ev4);
+#ifndef _WIN32
+	evsig = event_new(base, SIGHUP, EV_SIGNAL, tabf_cb, &es);
+	tt_assert(evsig);
+	event_add(evsig, &tenmin);
+#endif
+
+	event_add(ev1, &tenmin);
+	event_add(ev2, NULL);
+	event_add(ev3, NULL);
+	event_add(ev4, &tenmin);
+
+
+	event_base_assert_ok_(base);
+
+	/* Trigger 2, 3, 4 */
+	event_base_active_by_fd(base, data->pair[0], EV_WRITE);
+	event_base_active_by_fd(base, data->pair[1], EV_READ);
+#ifndef _WIN32
+	event_base_active_by_signal(base, SIGHUP);
+#endif
+
+	event_base_assert_ok_(base);
+
+	event_base_loop(base, EVLOOP_ONCE);
+
+	tt_int_op(e1, ==, 0);
+	tt_int_op(e2, ==, EV_WRITE | 0x10000);
+	tt_int_op(e3, ==, EV_READ | 0x10000);
+	/* Mask out EV_WRITE here, since it could be genuinely writeable. */
+	tt_int_op((e4 & ~EV_WRITE), ==, EV_READ | 0x10000);
+#ifndef _WIN32
+	tt_int_op(es, ==, EV_SIGNAL | 0x10000);
+#endif
+
+end:
+	if (ev1)
+		event_free(ev1);
+	if (ev2)
+		event_free(ev2);
+	if (ev3)
+		event_free(ev3);
+	if (ev4)
+		event_free(ev4);
+#ifndef _WIN32
+	if (evsig)
+		event_free(evsig);
+#endif
+}
+
 struct testcase_t main_testcases[] = {
 	/* Some converted-over tests */
 	{ "methods", test_methods, TT_FORK, NULL, NULL },
@@ -2850,6 +3240,8 @@ struct testcase_t main_testcases[] = {
 	BASIC(manipulate_active_events, TT_FORK|TT_NEED_BASE),
 	BASIC(event_new_selfarg, TT_FORK|TT_NEED_BASE),
 	BASIC(event_assign_selfarg, TT_FORK|TT_NEED_BASE),
+	BASIC(event_base_get_num_events, TT_FORK|TT_NEED_BASE),
+	BASIC(event_base_get_max_events, TT_FORK|TT_NEED_BASE),
 
 	BASIC(bad_assign, TT_FORK|TT_NEED_BASE|TT_NO_LOGS),
 	BASIC(bad_reentrant, TT_FORK|TT_NEED_BASE|TT_NO_LOGS),
@@ -2903,6 +3295,8 @@ struct testcase_t main_testcases[] = {
 	{ "gettimeofday_cached_disabled", test_gettimeofday_cached, TT_FORK, &basic_setup, (void*)"sleep disable" },
 	{ "gettimeofday_cached_disabled_nosleep", test_gettimeofday_cached, TT_FORK, &basic_setup, (void*)"disable" },
 
+	BASIC(active_by_fd, TT_FORK|TT_NEED_BASE|TT_NEED_SOCKETPAIR),
+
 #ifndef _WIN32
 	LEGACY(fork, TT_ISOLATED),
 #endif
@@ -2920,6 +3314,7 @@ struct testcase_t evtag_testcases[] = {
 
 struct testcase_t signal_testcases[] = {
 #ifndef _WIN32
+	LEGACY(simplestsignal, TT_ISOLATED),
 	LEGACY(simplesignal, TT_ISOLATED),
 	LEGACY(multiplesignal, TT_ISOLATED),
 	LEGACY(immediatesignal, TT_ISOLATED),

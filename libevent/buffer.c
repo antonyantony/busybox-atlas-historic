@@ -2485,9 +2485,11 @@ evbuffer_write_atmost(struct evbuffer *buffer, evutil_socket_t fd,
 		/* XXX(nickm) Don't disable this code until we know if
 		 * the WSARecv code above works. */
 		void *p = evbuffer_pullup(buffer, howmuch);
+		EVUTIL_ASSERT(p || !howmuch);
 		n = send(fd, p, howmuch, 0);
 #else
 		void *p = evbuffer_pullup(buffer, howmuch);
+		EVUTIL_ASSERT(p || !howmuch);
 		n = write(fd, p, howmuch);
 #endif
 #ifdef USE_SENDFILE
@@ -2740,7 +2742,10 @@ evbuffer_peek(struct evbuffer *buffer, ev_ssize_t len,
 	if (n_vec == 0 && len < 0) {
 		/* If no vectors are provided and they asked for "everything",
 		 * pretend they asked for the actual available amount. */
-		len = buffer->total_len - len_so_far;
+		len = buffer->total_len;
+		if (start_at) {
+			len -= start_at->pos;
+		}
 	}
 
 	while (chain) {
@@ -2935,6 +2940,20 @@ err:
 	return NULL;
 }
 
+#ifdef EVENT__HAVE_MMAP
+static long
+get_page_size(void)
+{
+#ifdef SC_PAGE_SIZE
+	return sysconf(SC_PAGE_SIZE);
+#elif defined(_SC_PAGE_SIZE)
+	return sysconf(_SC_PAGE_SIZE);
+#else
+	return 1;
+#endif
+}
+#endif
+
 /* DOCDOC */
 /* Requires lock */
 static int
@@ -2955,13 +2974,7 @@ evbuffer_file_segment_materialize(struct evbuffer_file_segment *seg)
 		if (offset) {
 			/* mmap implementations don't generally like us
 			 * to have an offset that isn't a round  */
-#ifdef SC_PAGE_SIZE
-			long page_size = sysconf(SC_PAGE_SIZE);
-#elif defined(_SC_PAGE_SIZE)
-			long page_size = sysconf(_SC_PAGE_SIZE);
-#else
-			long page_size = 1;
-#endif
+			long page_size = get_page_size();
 			if (page_size == -1)
 				goto err;
 			offset_leftover = offset % page_size;
@@ -3073,7 +3086,9 @@ evbuffer_file_segment_free(struct evbuffer_file_segment *seg)
 #ifdef _WIN32
 		CloseHandle(seg->mapping_handle);
 #elif defined (EVENT__HAVE_MMAP)
-		if (munmap(seg->mapping, seg->length) == -1)
+		off_t offset_leftover;
+		offset_leftover = seg->file_offset % get_page_size();
+		if (munmap(seg->mapping, seg->length + offset_leftover) == -1)
 			event_warn("%s: munmap failed", __func__);
 #endif
 	} else if (seg->contents) {
@@ -3191,7 +3206,7 @@ evbuffer_add_file_segment(struct evbuffer *buf,
 	return 0;
 err:
 	EVBUFFER_UNLOCK(buf);
-	evbuffer_file_segment_free(seg);
+	evbuffer_file_segment_free(seg); /* Lowers the refcount */
 	return -1;
 }
 
