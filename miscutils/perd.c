@@ -7,6 +7,7 @@
  * run as root, but NOT setuid root
  *
  * Copyright 1994 Matthew Dillon (dillon@apollo.west.oic.com)
+ * Copyright (c) 2014 RIPE NCC <atlas@ripe.net>
  * (version 2.3.2)
  * Vladimir Oleynik <dzo@simtreas.ru> (C) 2002
  *
@@ -1174,8 +1175,8 @@ static void find_eos(char *cp, char **ncpp)
 }
 
 
-#define ATLAS_NARGS	20	/* Max arguments to a built-in command */
-#define ATLAS_ARGSIZE	512	/* Max size of the command line */
+#define ATLAS_NARGS	40	/* Max arguments to a built-in command */
+#define ATLAS_ARGSIZE	4096	/* Max size of the command line */
 
 static int atlas_run(char *cmdline)
 {
