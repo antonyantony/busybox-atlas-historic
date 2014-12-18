@@ -93,9 +93,9 @@ INSERT
 #define evsslgetcert_full_usage "\n\n" \
      "todo"
 
-#define evsslping_trivial_usage \
+#define evsslscan_trivial_usage \
        "todo"
-#define evsslping_full_usage "\n\n" \
+#define evsslscan_full_usage "\n\n" \
      "todo"
 
 

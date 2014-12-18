@@ -1,5 +1,4 @@
 # DO NOT EDIT. This file is generated from Config.src
-#
 # For a description of the syntax of this configuration file,
 # see scripts/kbuild/config-language.txt.
 #
@@ -106,8 +105,8 @@ config EVSSLGETCERT
         help
                 standalone version of event-driven sslgetcert
 
-config EVSSLPING
-        bool "evsslping"
+config EVSSLSCAN
+        bool "evsslscan"
         default n
         help
                 ping ssl server with various paramenters and summarize
