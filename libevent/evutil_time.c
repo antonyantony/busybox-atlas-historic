@@ -54,6 +54,7 @@
 #include "event2/util.h"
 #include "util-internal.h"
 #include "log-internal.h"
+#include "mm-internal.h"
 
 #ifndef EVENT__HAVE_GETTIMEOFDAY
 /* No gettimeofday; this must be windows. */
@@ -160,6 +161,55 @@ adjust_monotonic_time(struct evutil_monotonic_timer *base,
 	base->last_time = *tv;
 }
 
+/*
+   Allocate a new struct evutil_monotonic_timer
+ */
+struct evutil_monotonic_timer *
+evutil_monotonic_timer_new(void)
+{
+  struct evutil_monotonic_timer *p = NULL;
+
+  p = mm_malloc(sizeof(*p));
+  if (!p) goto done;
+
+  memset(p, 0, sizeof(*p));
+
+ done:
+  return p;
+}
+
+/*
+   Free a struct evutil_monotonic_timer
+ */
+void
+evutil_monotonic_timer_free(struct evutil_monotonic_timer *timer)
+{
+  if (timer) {
+    mm_free(timer);
+  }
+}
+
+/*
+   Set up a struct evutil_monotonic_timer for initial use
+ */
+int
+evutil_configure_monotonic_time(struct evutil_monotonic_timer *timer,
+                                int flags)
+{
+  return evutil_configure_monotonic_time_(timer, flags);
+}
+
+/*
+   Query the current monotonic time
+ */
+int
+evutil_gettime_monotonic(struct evutil_monotonic_timer *timer,
+                         struct timeval *tp)
+{
+  return evutil_gettime_monotonic_(timer, tp);
+}
+
+
 #if defined(HAVE_POSIX_MONOTONIC)
 /* =====
    The POSIX clock_gettime() interface provides a few ways to get at a
@@ -184,12 +234,13 @@ evutil_configure_monotonic_time_(struct evutil_monotonic_timer *base,
 	struct timespec	ts;
 
 #ifdef CLOCK_MONOTONIC_COARSE
-#if CLOCK_MONOTONIC_COARSE < 0
-	/* Technically speaking, nothing keeps CLOCK_* from being negative (as
-	 * far as I know). This check and the one below make sure that it's
-	 * safe for us to use -1 as an "unset" value. */
-#error "I didn't expect CLOCK_MONOTONIC_COARSE to be < 0"
-#endif
+	if (CLOCK_MONOTONIC_COARSE < 0) {
+		/* Technically speaking, nothing keeps CLOCK_* from being
+		 * negative (as far as I know). This check and the one below
+		 * make sure that it's safe for us to use -1 as an "unset"
+		 * value. */
+		event_errx(1,"I didn't expect CLOCK_MONOTONIC_COARSE to be < 0");
+	}
 	if (! precise && ! fallback) {
 		if (clock_gettime(CLOCK_MONOTONIC_COARSE, &ts) == 0) {
 			base->monotonic_clock = CLOCK_MONOTONIC_COARSE;
@@ -202,9 +253,9 @@ evutil_configure_monotonic_time_(struct evutil_monotonic_timer *base,
 		return 0;
 	}
 
-#if CLOCK_MONOTONIC < 0
-#error "I didn't expect CLOCK_MONOTONIC to be < 0"
-#endif
+	if (CLOCK_MONOTONIC < 0) {
+		event_errx(1,"I didn't expect CLOCK_MONOTONIC to be < 0");
+	}
 
 	base->monotonic_clock = -1;
 	return 0;

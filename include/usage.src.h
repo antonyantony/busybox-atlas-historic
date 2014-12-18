@@ -70,8 +70,15 @@ INSERT
      "\n        -4                      Only IPv4 addresses" \
      "\n        -6                      Only IPv6 addresses" \
 
+#define evntp_trivial_usage \
+	       "todo"\
+
+#define evntp_full_usage \
+	       "todo" \
+
 #define evping_trivial_usage \
        "todo"
+
 #define evping_full_usage "\n\n" \
         "\nOptions:" \
         "\n     -c <count>      Number of packets" \
@@ -80,7 +87,6 @@ INSERT
         "\n     -O <out file>   Output file name" \
         "\n     -4              IPv4" \
         "\n     -6              IPv6" \
-     "todo"
 
 #define evsslgetcert_trivial_usage \
        "todo"
@@ -94,12 +100,12 @@ INSERT
 
 
 #define evtraceroute_trivial_usage \
-        "-[46FIrTU] [-a <paris mod>] [-c <count>] [-f <hop>]" \
-"\n     [-g <gap>] [-m <hop>] [-w <ms>] [-z <ms>] [-A <string>] [-O <file>]" \
-"\n     [-S <size>]"
+	"-[46FIrTU] [-a <paris mod>] [-c <count>] [-f <hop>]" \
+"\n     [-g <gap>] [-m <hop>] [-p <port>] [-w <ms>] [-z <ms>] [-A <string>]" \
+"\n     [-O <file>] [-S <size>] [-H <hbh size>] [-D <dest. opt. size>]"
 
 #define evtraceroute_full_usage "\n" \
-     "\n        -4                      Use IPv4 (default)" \
+	     "\n        -4                      Use IPv4 (default)" \
      "\n        -6                      Use IPv6" \
      "\n        -F                      Don't fragment" \
      "\n        -I                      Use ICMP" \
@@ -111,9 +117,12 @@ INSERT
      "\n        -f <hop>                Starting hop" \
      "\n        -g <gap>                Gap limit" \
      "\n        -m <hop>                Max hops" \
+     "\n        -p <port>               Destination port" \
      "\n        -w <timeout>            No reply timeout (ms)" \
      "\n        -z <timeout>            Dup timeout (ms)" \
      "\n        -A <string>             Atlas measurement ID" \
+     "\n        -D <size>               Add IPv6 Destination Option this size" \
+     "\n        -H <size>               Add IPv6 Hop-by-hop Option this size" \
      "\n        -O <file>               Name of output file" \
      "\n        -S <size>               Size of packet" \
 
@@ -140,11 +149,10 @@ INSERT
 
 #define rptra6_trivial_usage \
 
-#define rptaddr6_full_usage "\n\n" \
-
-#define rptaddr6_trivial_usage \
-
 #define rptra6_full_usage "\n\n" \
 
+#define rptaddrs_full_usage "\n\n" \
+
+#define rptaddrs_trivial_usage \
 
 #endif

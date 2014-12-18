@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 RIPE NCC <atlas@ripe.net>
+ * Copyright (c) 2013-2014 RIPE NCC <atlas@ripe.net>
  * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  * eperd.h
  */
@@ -43,6 +43,7 @@ struct testops
 
 extern struct testops condmv_ops;
 extern struct testops httpget_ops;
+extern struct testops ntp_ops;
 extern struct testops ping_ops;
 extern struct testops sslgetcert_ops;
 extern struct testops tdig_ops;

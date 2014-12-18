@@ -5,7 +5,7 @@ The BusyBox build process is similar to the Linux kernel build:
 
   cd libevent         # first build libevent
   ./autogen.sh 
-  ./configure --prefix=`pwd`
+  ./configure --prefix=`pwd`/libs
   make install 
   cd ../
   make menuconfig     # This creates a file called ".config"

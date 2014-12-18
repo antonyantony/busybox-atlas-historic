@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 RIPE NCC <atlas@ripe.net>
+ * Copyright (c) 2013-2014 RIPE NCC <atlas@ripe.net>
  * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 #include "libbb.h"
@@ -35,7 +35,7 @@ static void usage(void)
 	exit(1);
 }
 
-int rptaddr6_main(int argc, char *argv[]) MAIN_EXTERNALLY_VISIBLE;
+int rptra6_main(int argc, char *argv[]) MAIN_EXTERNALLY_VISIBLE;
 int rptra6_main(int argc, char *argv[])
 {
 	int i, r, first, sock, on, nrecv, rcvd_ttl, olen;
