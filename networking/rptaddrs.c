@@ -1,37 +1,32 @@
 /*
-<<<<<<< HEAD:networking/rptaddrs.c:int
- * rptaddr6.c
- * Copyright (c) 2013 RIPE NCC <atlas@ripe.net>
-=======
  * rptaddrs.c
  * Copyright (c) 2013-2014 RIPE NCC <atlas@ripe.net>
->>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
  * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
 #include <errno.h>
+#include <resolv.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 #include <net/route.h>
+#include <net/if.h>
 #include <inet_common.h>
 #include "../eperd/eperd.h"
+#include "../eperd/readresolv.h"
 
 #include "libbb.h"
 
+#define IPV4_ROUTE_FILE	"/proc/net/route"
 #define IF_INET6_FILE	"/proc/net/if_inet6"
 #define IPV6_ROUTE_FILE	"/proc/net/ipv6_route"
 #define SUFFIX		".new"
 
-<<<<<<< HEAD:networking/rptaddrs.c:int
-#define SAFE_PREFIX_O ATLAS_DATA_OUT
-=======
 #define IPV4_STATIC	ATLAS_STATUS "/network_v4_static_info.json"
 #define IPV6_STATIC	ATLAS_STATUS "/network_v6_static_info.json"
 #define DNS_STATIC	ATLAS_STATUS "/network_dns_static_info.json"
 #define NETWORK_INFO	ATLAS_STATUS "/network_v4_info.txt"
 
->>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 #define SAFE_PREFIX_N ATLAS_DATA_NEW
 
 #define OPT_STRING      "A:O:c:"
@@ -56,18 +51,21 @@ enum {
 	OPT_a =  (1 << 0),
 };
 
-static int setup_ipv6_rpt(char *cache_name, int *need_report);
+static FILE *setup_cache(char *cache_name);
+static int setup_ipv4_rpt(FILE *of);
+static int setup_dhcpv4(FILE *of);
+static int setup_ipv6_rpt(FILE *of);
+static int setup_dns(FILE *of);
+static int setup_static_rpt(FILE *of);
+static int report_line(FILE *of, const char *fn);
+static int check_cache(char *cache_name);
 static int rpt_ipv6(char *cache_name, char *out_name, char *opt_atlas, int opt_append);
 static void report(const char *fmt, ...);
 static void report_err(const char *fmt, ...); 
 
-<<<<<<< HEAD:networking/rptaddrs.c:int
-int rptaddr6_main(int argc, char *argv[])
-=======
 int rptaddrs_main(int argc, char *argv[]);
 
 int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
->>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 {
 	int r, need_report;
 	unsigned opt;
@@ -75,6 +73,7 @@ int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
        	char *cache_name;	/* temp file in an intermediate format */
 	char *out_name;		/* output file in json: timestamp opt_atlas */
 	int opt_append;
+	FILE *cf;
 
 	opt_atlas= NULL;
 	out_name = NULL;
@@ -85,10 +84,10 @@ int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
 
 	opt= getopt32(argv, OPT_STRING, &opt_atlas, &out_name, &cache_name);
 
-	if (out_name && !validate_filename(out_name, SAFE_PREFIX_O))
+	if (out_name && !validate_filename(out_name, SAFE_PREFIX_N))
 	{
 		crondlog(LVL8 "insecure file '%s' : allowed '%s'", out_name, 
-				SAFE_PREFIX_O);
+				SAFE_PREFIX_N);
 		return 1;
 	}
 	if (cache_name && !validate_filename(cache_name, SAFE_PREFIX_N))
@@ -106,9 +105,47 @@ int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
 	if (opt & OPT_a) 
 		opt_append = TRUE;
 
-	r= setup_ipv6_rpt(cache_name, &need_report);
-	if (r != 0)
-		return r;
+	cf= setup_cache(cache_name);
+	if (cf == NULL)
+		return 1;
+
+	r= setup_ipv4_rpt(cf);
+	if (r == -1)
+	{
+		fclose(cf);
+		return 1;
+	}
+
+	r= setup_dhcpv4(cf);
+	if (r == -1)
+	{
+		fclose(cf);
+		return 1;
+	}
+
+	r= setup_ipv6_rpt(cf);
+	if (r == -1)
+	{
+		fclose(cf);
+		return 1;
+	}
+
+	r= setup_dns(cf);
+	if (r == -1)
+	{
+		fclose(cf);
+		return 1;
+	}
+
+	r= setup_static_rpt(cf);
+	if (r == -1)
+	{
+		fclose(cf);
+		return 1;
+	}
+	fclose(cf);
+
+	need_report= check_cache(cache_name);
 	if (need_report)
 	{
 		r = rpt_ipv6(cache_name, out_name, opt_atlas, opt_append);
@@ -118,33 +155,16 @@ int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
 
 	return 0;
 }
-static int setup_ipv6_rpt(char *cache_name, int *need_report)
+
+static FILE *setup_cache(char *cache_name)
 {
-	int i, r, n;
-	char *cp, *cp1;
+	FILE *out_file;
 	char filename[80];
-	char dst6in[INET6_ADDRSTRLEN];
-	char nh6in[INET6_ADDRSTRLEN]; /* next hop */
-	char *dst6out = NULL;
-	char *nh6out = NULL;
-	char dst6p[8][5];
-	char nh6p[8][5];
-	char iface[16], flags[16];
-	char Scope[32];
-	int scope, dad_status, if_idx;
-	int iflags, metric, refcnt, use, prefix_len, slen;
-	struct sockaddr_in6 sdst6, snh6;
-
-	char buf1[1024];
-	char buf2[1024];
-	FILE *in_file, *out_file, *cache_file;
-
-	*need_report= 0;
 
 	if (strlen(cache_name) + strlen(SUFFIX) + 1 > sizeof(filename))
 	{
 		report("cache name '%s' too long", cache_name);
-		return 1;
+		return NULL;
 	}
 
 	strlcpy(filename, cache_name, sizeof(filename));
@@ -154,9 +174,6 @@ static int setup_ipv6_rpt(char *cache_name, int *need_report)
 	if (out_file == NULL)
 	{
 		report_err("unable to create '%s'", filename);
-<<<<<<< HEAD:networking/rptaddrs.c:int
-		return 1;
-=======
 		return NULL;
 	}
 
@@ -289,16 +306,40 @@ static int setup_dhcpv4(FILE *of)
 				break;
 			}
 		}
->>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 	}
+	
+	fclose(in_file);
+	if (found)
+		return 0;
+	report("setup_dhcpv4: DHCP field not found");
+	return -1;
+}
+
+static int setup_ipv6_rpt(FILE *of)
+{
+	int r, n;
+	char filename[80];
+	char dst6in[INET6_ADDRSTRLEN];
+	char nh6in[INET6_ADDRSTRLEN]; /* next hop */
+	char *dst6out = NULL;
+	char *nh6out = NULL;
+	char dst6p[8][5];
+	char nh6p[8][5];
+	char iface[16], flags[16];
+	char Scope[32];
+	int scope, dad_status, if_idx;
+	int iflags, metric, refcnt, use, prefix_len, slen;
+	struct sockaddr_in6 sdst6, snh6;
+	char buf2[1024];
+
+	FILE *in_file;
 
 	/* Copy IF_INET6_FILE */
 	in_file= fopen(IF_INET6_FILE, "r");
 	if (in_file == NULL)
 	{
 		report_err("unable to open '%s'", IF_INET6_FILE);
-		fclose(out_file);
-		return 1;
+		return -1;
 	}
 	n = 0;
 	while ((r = fscanf(in_file, "%4s%4s%4s%4s%4s%4s%4s%4s %08x %02x %02x %02x %20s\n",
@@ -334,11 +375,11 @@ static int setup_dhcpv4(FILE *of)
 			default:
 				snprintf(Scope, sizeof(Scope), "Unknown %d", scope);
 		}
-		r = snprintf(buf2, sizeof(buf2), "%s %s{" DBQ(inet6 addr) " : "
-				DBQ(%s) ", " DBQ(prefix length) " : %d,"
+		r = snprintf(buf2, sizeof(buf2), "%s %s{" DBQ(inet6-addr) " : "
+				DBQ(%s) ", " DBQ(prefix-length) " : %d,"
 				DBQ(scope) " : " DBQ(%s) ", " DBQ(interface) 
 				" : " DBQ(%s) "}",  
-				n ? "" : "\"inet6 addresses\" : [", n ? ", " : ""
+				n ? "" : ", \"inet6-addresses\" : [", n ? ", " : ""
 				, dst6out, prefix_len, Scope, iface);
 
 		/* printf("%s\n", buf2); */
@@ -348,31 +389,28 @@ static int setup_dhcpv4(FILE *of)
 			dst6out=NULL;
 		}
 		n++;
-		if (fwrite(buf2, 1, r, out_file) != r)
+		if (fwrite(buf2, 1, r, of) != r)
 		{
 			report_err("error writing to '%s'", filename);
 			fclose(in_file);
-			fclose(out_file);
-			return 1;
+			return -1;
 		}
 
 		if (ferror(in_file))
 		{
 			report_err("error reading from '%s'", IF_INET6_FILE);
 			fclose(in_file);
-			fclose(out_file);
-			return 1;
+			return -1;
 		}
 	}	
 	if ( n > 0 ) {
 		r = snprintf(buf2, 2, "]");
 	}		
-	if (fwrite(buf2, 1, r, out_file) != r)
+	if (fwrite(buf2, 1, r, of) != r)
 	{
 		report_err("error writing to '%s'", filename);
 		fclose(in_file);
-		fclose(out_file);
-		return 1;
+		return -1;
 	}
 
 	fclose(in_file);
@@ -382,8 +420,7 @@ static int setup_dhcpv4(FILE *of)
 	if (in_file == NULL)
 	{
 		report_err("unable to open '%s'", IPV6_ROUTE_FILE);
-		fclose(out_file);
-		return 1;
+		return -1;
 	}
 
 	n = 0;
@@ -399,8 +436,7 @@ static int setup_dhcpv4(FILE *of)
 			}
 			report_err("reading '%s'", IF_INET6_FILE);
 			fclose(in_file);
-			fclose(out_file);
-			return 1;
+			return -1;
 		}
 
 		/* skip some the stuff we don't want to report */
@@ -441,21 +477,21 @@ static int setup_dhcpv4(FILE *of)
 	
 			
 		r = snprintf(buf2, sizeof(buf2), "%s %s{" DBQ(destination) " : "
-				DBQ(%s) ", " DBQ(prefix length) " : %d,"
-				DBQ(next hop) " : " DBQ(%s) ", " DBQ(flags)
+				DBQ(%s) ", " DBQ(prefix-length) " : %d,"
+				DBQ(next-hop) " : " DBQ(%s) ", " DBQ(flags)
 				" : " DBQ(%s) ", " DBQ(metric) " : %d , "
 				DBQ(interface) " : " DBQ(%s) "}",
-				n ? "" : ", \"inet6 routes\" : [", n ? ", " : ""
+				n ? "" : ", \"inet6-routes\" : [", n ? ", " : ""
 				, dst6out, prefix_len, nh6out, flags, metric
 				, iface);
 
 		/*
 		r = snprintf(buf2, sizeof(buf2), "%s %s{" DBQ(destination) " : "
-				DBQ(%s) ", " DBQ(prefix length) " : %d," 
-				DBQ(next hop) " : " DBQ(%s) ", " DBQ(flags) 
+				DBQ(%s) ", " DBQ(prefix-length) " : %d," 
+				DBQ(next-hop) " : " DBQ(%s) ", " DBQ(flags) 
 				" : " DBQ(%s) ", " DBQ(metric) " : %d , "
 				DBQ(interface) " : " DBQ(%s) "}",
-				n ? " " : '"inet6 routes" ['
+				n ? " " : '"inet6-routes" ['
 				, n ? ", " : ""
 				, dst6out, prefix_len, nh6out, flags, metric
 				, iface); 
@@ -472,24 +508,22 @@ static int setup_dhcpv4(FILE *of)
 			nh6out=NULL;
 		}
 
-		if (fwrite(buf2, 1, r, out_file) != r)
+		if (fwrite(buf2, 1, r, of) != r)
 		{
 			report_err("error writing to '%s'", filename);
 			fclose(in_file);
-			fclose(out_file);
-			return 1;
+			return -1;
 		}
 		n++;
 	}
 	if ( n > 0 ) {
 		r = snprintf(buf2, 2, "]");
 	}		
-	if (fwrite(buf2, 1, r, out_file) != r)
+	if (fwrite(buf2, 1, r, of) != r)
 	{
 		report_err("error writing to '%s'", filename);
 		fclose(in_file);
-		fclose(out_file);
-		return 1;
+		return -1;
 	}
 
 
@@ -497,13 +531,10 @@ static int setup_dhcpv4(FILE *of)
 	{
 		report_err("error reading from '%s'", IPV6_ROUTE_FILE);
 		fclose(in_file);
-		fclose(out_file);
-		return 1;
+		return -1;
 	}
 	fclose(in_file);
 
-<<<<<<< HEAD:networking/rptaddrs.c:int
-=======
 	return 0;
 }
 
@@ -613,14 +644,12 @@ static int check_cache(char *cache_name)
 		need_report= 1;
 	}
 
->>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 	/* Now check if the new file is different from the cache one */
-	fclose(out_file);
 	cache_file= fopen(cache_name, "r");
 	if (cache_file == NULL)
 	{
 		/* Assume that any kind of error here calls for reporting */
-		*need_report= 1;
+		need_report= 1;
 	}
 
 	if (cache_file)
@@ -639,37 +668,37 @@ static int check_cache(char *cache_name)
 			if (fread(buf2, 1, sizeof(buf2), in_file) != r)
 			{
 				/* Ignore errors, just report */
-				*need_report= 1;
+				need_report= 1;
 				break;
 			}
 
 			if (memcmp(buf1, buf2, r) != 0)
 			{
 				/* Something changed, report */
-				*need_report= 1;
+				need_report= 1;
 				break;
 			}
 		}
 
 		/* Maybe something got added */
-		if (!*need_report)
+		if (!need_report)
 		{
 			if (fread(buf2, 1, sizeof(buf2), in_file) != 0)
 			{
-				*need_report= 1;
+				need_report= 1;
 			}
 		}
 		fclose(cache_file);
 		fclose(in_file);
 	}
 
-	if (*need_report)
+	if (need_report)
 	{
 		if (rename(filename, cache_name) == -1)
 		{
 			report_err("renaming '%s' to '%s' failed",
 				filename, cache_name);
-			return 1;
+			return 0;
 		}
 	}
 	else
@@ -681,15 +710,13 @@ static int check_cache(char *cache_name)
 		}
 	}
 
-	return 0;
+	return need_report;
 }
-
 
 static int rpt_ipv6(char *cache_name, char *out_name, char *opt_atlas, int opt_append)
 {
 	FILE *file;
 	FILE *fh;
-	char *cp;
 	char buf[256];
 	struct timeval now;
 
@@ -702,12 +729,15 @@ static int rpt_ipv6(char *cache_name, char *out_name, char *opt_atlas, int opt_a
 
 	if (out_name) {
 		if(opt_append) 
-			fh= fopen(out_name, "w");
+			fh= fopen(out_name, "a");
 		else 
 			fh= fopen(out_name, "w");
 
 		if (!fh)
-			crondlog(DIE9 "unable to append to '%s'", out_name);
+		{
+			report_err("unable to append to '%s'", out_name);
+			return 1;
+		}
 	}
 	else
 		fh = stdout;
@@ -738,7 +768,7 @@ static void report(const char *fmt, ...)
 
 	va_start(ap, fmt);
 
-	fprintf(stderr, "rptaddr6: ");
+	fprintf(stderr, "rptaddrs: ");
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, "\n");
 
@@ -754,7 +784,7 @@ static void report_err(const char *fmt, ...)
 
 	va_start(ap, fmt);
 
-	fprintf(stderr, "rptaddr6: ");
+	fprintf(stderr, "rptaddrs: ");
 	vfprintf(stderr, fmt, ap);
 	fprintf(stderr, ": %s\n", strerror(t_errno));
 
