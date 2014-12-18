@@ -1,6 +1,11 @@
 /*
+<<<<<<< HEAD:networking/rptaddrs.c:int
  * rptaddr6.c
  * Copyright (c) 2013 RIPE NCC <atlas@ripe.net>
+=======
+ * rptaddrs.c
+ * Copyright (c) 2013-2014 RIPE NCC <atlas@ripe.net>
+>>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
  * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
@@ -18,7 +23,15 @@
 #define IPV6_ROUTE_FILE	"/proc/net/ipv6_route"
 #define SUFFIX		".new"
 
+<<<<<<< HEAD:networking/rptaddrs.c:int
 #define SAFE_PREFIX_O ATLAS_DATA_OUT
+=======
+#define IPV4_STATIC	ATLAS_STATUS "/network_v4_static_info.json"
+#define IPV6_STATIC	ATLAS_STATUS "/network_v6_static_info.json"
+#define DNS_STATIC	ATLAS_STATUS "/network_dns_static_info.json"
+#define NETWORK_INFO	ATLAS_STATUS "/network_v4_info.txt"
+
+>>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 #define SAFE_PREFIX_N ATLAS_DATA_NEW
 
 #define OPT_STRING      "A:O:c:"
@@ -48,7 +61,13 @@ static int rpt_ipv6(char *cache_name, char *out_name, char *opt_atlas, int opt_a
 static void report(const char *fmt, ...);
 static void report_err(const char *fmt, ...); 
 
+<<<<<<< HEAD:networking/rptaddrs.c:int
 int rptaddr6_main(int argc, char *argv[])
+=======
+int rptaddrs_main(int argc, char *argv[]);
+
+int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
+>>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 {
 	int r, need_report;
 	unsigned opt;
@@ -135,7 +154,142 @@ static int setup_ipv6_rpt(char *cache_name, int *need_report)
 	if (out_file == NULL)
 	{
 		report_err("unable to create '%s'", filename);
+<<<<<<< HEAD:networking/rptaddrs.c:int
 		return 1;
+=======
+		return NULL;
+	}
+
+	return out_file;
+}
+
+#define MAX_INF	10
+
+static int setup_ipv4_rpt(FILE *of)
+{
+	int i, r, s, first;
+	unsigned dest, gateway, flags, refcnt, use, metric, mask;
+	FILE *in_file;
+	struct in_addr in_addr;
+	struct ifconf ifconf;
+	struct ifreq ifreq1;
+	struct ifreq ifreq[MAX_INF];
+	char infname[20];
+	char line[256];
+
+	s= socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+	if (s == -1)
+	{
+		report_err("socket failed");
+		return -1;
+	}
+	ifconf.ifc_len= sizeof(ifreq);
+	ifconf.ifc_req= ifreq;
+	r= ioctl(s, SIOCGIFCONF, &ifconf);
+	if (r == -1)
+	{
+		report_err("SIOCGIFCONF failed");
+		close(s);
+		return -1;
+	}
+
+	fprintf(of, DBQ(inet-addresses) ": [ ");
+	for (i= 0; i<ifconf.ifc_len/sizeof(ifreq[0]); i++)
+	{
+		memcpy(ifreq1.ifr_name, ifreq[i].ifr_name,
+			sizeof(ifreq1.ifr_name));
+		r= ioctl(s, SIOCGIFNETMASK, &ifreq1);
+		if (r == -1)
+		{
+			report_err("SIOCGIFNETMASK failed");
+			close(s);
+			return -1;
+		}
+		fprintf(of, "%s{ " DBQ(inet-addr) ": " DBQ(%s) ", ",
+			i == 0 ? "" : ", ",
+			inet_ntoa(((struct sockaddr_in *)(&ifreq[i].ifr_addr))
+				->sin_addr));
+		fprintf(of, DBQ(netmask) ": " DBQ(%s) ", " 
+			DBQ(interface) ": " DBQ(%s) " }",
+			inet_ntoa(((struct sockaddr_in *)(&ifreq1.ifr_addr))->
+				sin_addr),
+			ifreq[i].ifr_name);
+	}
+
+	close(s);
+
+	fprintf(of, " ]");
+
+	in_file= fopen(IPV4_ROUTE_FILE, "r");
+	if (in_file == NULL)
+	{
+		report_err("unable to open '%s'", IPV4_ROUTE_FILE);
+		return -1;
+	}
+	
+	/* Skip first line */
+	fgets(line, sizeof(line), in_file);
+	
+	fprintf(of, ", " DBQ(inet-routes) ": [ ");
+	first= 1;
+
+	while (fgets(line, sizeof(line), in_file) != NULL)
+	{
+		sscanf(line, "%16s %x %x %x %d %d %d %x",
+			infname, &dest, &gateway, &flags, &refcnt, &use, 
+			&metric, &mask);
+		in_addr.s_addr= dest;
+		fprintf(of, "%s{ " DBQ(destination) ": " DBQ(%s) ", ",
+			first ? "" : ", ", inet_ntoa(in_addr));
+		in_addr.s_addr= mask;
+		fprintf(of, DBQ(netmask) ": " DBQ(%s) ", ",
+			inet_ntoa(in_addr));
+		in_addr.s_addr= gateway;
+		fprintf(of, DBQ(next-hop) ": " DBQ(%s) ", "
+			DBQ(interface) ": " DBQ(%s) " }",
+			inet_ntoa(in_addr), infname);
+		first= 0;
+	}
+
+	fprintf(of, " ]");
+
+	fclose(in_file);
+
+	return 0;
+}
+
+static int setup_dhcpv4(FILE *of)
+{
+	int found;
+	FILE *in_file;
+	const char *value;
+	char line[128];
+
+	in_file= fopen(NETWORK_INFO, "r");
+	if (in_file == NULL)
+	{
+		report_err("unable to open '%s'", NETWORK_INFO);
+		return -1;
+	}
+	found= 0;
+	while (fgets(line, sizeof(line), in_file) != NULL)
+	{
+		if (strncmp(line, "DHCP ", 5) == 0)
+		{
+			value= NULL;
+			if (strncmp(line+5, "True", 4) == 0)
+				value= "true";
+			else if (strncmp(line+5, "False", 5) == 0)
+				value= "false";
+			if (value)
+			{
+				fprintf(of, ", " DBQ(inet-dhcp) ": %s",
+					value);
+				found= 1; 
+				break;
+			}
+		}
+>>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 	}
 
 	/* Copy IF_INET6_FILE */
@@ -264,6 +418,9 @@ static int setup_ipv6_rpt(char *cache_name, int *need_report)
 			continue;
 		}
 
+		if (prefix_len == 128)
+			continue;	/* Skip host routes */
+
 		 snprintf(dst6in, sizeof(dst6in), "%s:%s:%s:%s:%s:%s:%s:%s",
                                                 dst6p[0], dst6p[1], dst6p[2], dst6p[3],
                                                 dst6p[4], dst6p[5], dst6p[6], dst6p[7]);
@@ -345,6 +502,118 @@ static int setup_ipv6_rpt(char *cache_name, int *need_report)
 	}
 	fclose(in_file);
 
+<<<<<<< HEAD:networking/rptaddrs.c:int
+=======
+	return 0;
+}
+
+static int setup_dns(FILE *of)
+{
+	int i, resolv_max;
+	char nslist[MAXNS][INET6_ADDRSTRLEN * 2];
+
+	resolv_max= 0;
+
+	get_local_resolvers_nocache(nslist, &resolv_max);
+
+	fprintf(of, ", " DBQ(dns) ": [ ");
+	for (i= 0; i<resolv_max; i++)
+	{
+		fprintf(of, "%s{ " DBQ(nameserver) ": " DBQ(%s) " }",
+			i == 0 ? "" : ", ", 
+			nslist[i]);
+	}
+	
+	fprintf(of, " ]");
+	
+	return 0;
+}
+
+static int setup_static_rpt(FILE *of)
+{
+	int r;
+
+	r= report_line(of, IPV4_STATIC);
+	if (r == -1)
+		return -1;
+	r= report_line(of, IPV6_STATIC);
+	if (r == -1)
+		return -1;
+	r= report_line(of, DNS_STATIC);
+	if (r == -1)
+		return -1;
+	return 0;
+}
+
+static int report_line(FILE *of, const char *fn)
+{
+	FILE *f;
+	char *nl;
+	char line[512];
+
+	f= fopen(fn, "r");
+	if (f == NULL)
+	{
+		if (errno != ENOENT)
+		{
+			report_err("open '%s' failed", fn);
+			return -1;
+		}
+	}
+	else
+	{
+		if (fgets(line, sizeof(line), f) == NULL)
+		{
+			if (ferror(f))
+			{
+				report_err("error reading from '%s'", fn);
+			}
+			else
+				report("error reading from '%s': EOF");
+			fclose(f);
+			return -1;
+		}
+		fclose(f);
+		nl= strchr(line, '\n');
+		if (nl == NULL)
+		{
+			report("line too long in '%s'", fn);
+			return -1;
+		}
+		*nl= '\0';
+		fprintf(of, ", %s", line);
+	}
+
+	return 0;
+}
+
+static int check_cache(char *cache_name)
+{
+	int r, need_report;
+	struct stat sb;
+	char filename[80];
+
+	char buf1[1024];
+	char buf2[1024];
+	FILE *in_file, *cache_file;
+
+	strlcpy(filename, cache_name, sizeof(filename));
+	strlcat(filename, SUFFIX, sizeof(filename));
+
+	need_report= 0;
+
+	if (stat(cache_name, &sb) == 0 &&
+		sb.st_mtime < time(NULL) - 30 * 24 * 3600)
+	{
+		/* This basically makes sure that this information gets
+		 * reported again when the clock is set for the first time.
+		 * A side effect is that it gets reported once a month if
+		 * nothing changes.
+		 */
+		need_report= 1;
+	}
+
+>>>>>>> ripe-atlas-fw-4670:networking/rptaddrs.c
 	/* Now check if the new file is different from the cache one */
 	fclose(out_file);
 	cache_file= fopen(cache_name, "r");

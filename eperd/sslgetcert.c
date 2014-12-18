@@ -1,6 +1,6 @@
 /*
 sslgetcert.c -- libevent-based version of sslgetcert
-
+Copyright (c) 2013-2014 RIPE NCC <atlas@ripe.net>
 Created:	April 2013 by Philip Homburg for RIPE NCC
 */
 
@@ -74,6 +74,7 @@ struct state
 	/* Parameters */
 	char *output_file;
 	char *atlas;
+	char *infname;
 	char only_v4;
 	char only_v6;
 
@@ -603,7 +604,7 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 {
 	int c, i, only_v4, only_v6;
 	size_t newsiz;
-	char *hostname, *str_port;
+	char *hostname, *str_port, *infname;
 	char *output_file, *A_arg;
 	struct state *state;
 	FILE *fh;
@@ -611,6 +612,7 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 	/* Arguments */
 	output_file= NULL;
 	A_arg= NULL;
+	infname= NULL;
 	str_port= NULL;
 	only_v4= 0;
 	only_v6= 0;
@@ -625,7 +627,7 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 
 	/* Allow us to be called directly by another program in busybox */
 	optind= 0;
-	while (c= getopt_long(argc, argv, "A:O:p:46", longopts, NULL), c != -1)
+	while (c= getopt_long(argc, argv, "A:O:i:p:46", longopts, NULL), c != -1)
 	{
 		switch(c)
 		{
@@ -634,6 +636,9 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 			break;
 		case 'O':
 			output_file= optarg;
+			break;
+		case 'i':
+			infname= optarg;
 			break;
 		case 'p':
 			str_port= optarg;
@@ -689,6 +694,7 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 	state->base= hg_base;
 	state->atlas= A_arg ? strdup(A_arg) : NULL;
 	state->output_file= output_file ? strdup(output_file) : NULL;
+	state->infname= infname ? strdup(infname) : NULL;
 	state->hostname= strdup(hostname);
 	if (str_port)
 		state->portname= strdup(str_port);
@@ -1193,6 +1199,13 @@ static void reporterr(struct tu_env *env, enum tu_err cause,
 		err_reading(state);
 		break;
 
+	case TU_SOCKET_ERR:
+		snprintf(line, sizeof(line),
+			DBQ(sockerr) ":" DBQ(%s), str);
+		add_str(state, line);
+		report(state);
+		break;
+
 	case TU_CONNECT_ERR:
 		snprintf(line, sizeof(line),
 			DBQ(err) ":" DBQ(connect: %s), str);
@@ -1264,7 +1277,7 @@ static void sslgetcert_start(void *vstate)
 
 	tu_connect_to_name(&state->tu_env, state->hostname,
 		state->portname,
-		&interval, &hints, NULL, timeout_callback,
+		&interval, &hints, state->infname, timeout_callback,
 		reporterr, dnscount, beforeconnect,
 		connected, readcb, writecb);
 }
@@ -1303,6 +1316,8 @@ static int sslgetcert_delete(void *vstate)
 	state->hostname= NULL;
 	free(state->portname);
 	state->portname= NULL;
+	free(state->infname);
+	state->infname= NULL;
 
 	free(state);
 

@@ -23,6 +23,20 @@ config FEATURE_EOOQD_MAX_BUSY
 	help
 	  Location of eperd spool.
 
+config FEATURE_EOOQD_PREFIX
+        string "eooqd file name prefix"
+        default "/var/lib/eperd/crons/ooq"
+        depends on EPERD
+        help
+          Location of eperd spool.
+
+config FEATURE_EOOQD_OUT_DIR
+        string "eooqd output directory."
+        default "/var/lib/eperd/out/ooq"
+        depends on EPERD
+        help
+          Location of eperd output ready to be fetched/deleted.
+
 config EPERD
 	bool "Eperd"
 	default n
