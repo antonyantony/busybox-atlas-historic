@@ -49,23 +49,54 @@ enum readstate { READ_FIRST, READ_STATUS, READ_HEADER, READ_BODY, READ_SIMPLE,
 enum writestate { WRITE_FIRST, WRITE_HEADER, WRITE_POST_HEADER,
 	WRITE_POST_FILE, WRITE_POST_FOOTER, WRITE_DONE };
 
-/* How to keep track of each user sslping query */
+/* How to keep track of each user sslscan query */
 struct ssl_state {
-
-	struct bufferevent *bev_tcp;
 	char *host;
-	char *port;
-	SSL_CTX *ssl_ctx;
-	SSL *ssl;
-	struct bufferevent *bev;
-
-	char * str_Atlas;
-	char * out_filename;
+	char *str_Atlas;
+	char *out_filename;
 
 	struct buf err;
-	struct buf result;
+	struct buf *result; /* all children share same result structure as parent */
 
 	struct evutil_addrinfo *addr;
+	struct timeval start_time;
+
+	char *port;
+	char do_get;
+	char do_head;
+	char do_http10;
+	char *user_agent;
+	char *path;
+
+	int dns_count; /* resolved addresses to query */
+	struct timeval timeout_tv;
+
+	int active; /* how many pending additional quries per query */
+
+	int opt_retry_max;
+	int opt_ignore_cert;
+	int opt_rset;
+
+	int opt_v4_only;
+	int opt_v6_only;
+	int opt_max_con; /* maximum concurrent queries per destination */
+	int opt_max_bytes; /*  max size of output buffer */
+	struct ssl_state *c;
+};
+
+struct ssl_child {
+	/* per instance variables. Unshared after duplicate */
+	int serial;  /* serial number of each additional query. First is zero */
+
+	struct ssl_state *p; /* parent object */
+	struct buf *result; /* all children share same result structure as parent */
+
+	struct buf err;
+	struct bufferevent *bev_tcp;
+
+	SSL_CTX *ssl_ctx; 
+	SSL *ssl;
+	struct bufferevent *bev;
 	struct evutil_addrinfo *addr_curr;
 
 	struct timeval start_time;
@@ -73,26 +104,10 @@ struct ssl_state {
 	double ttc;
 	int retry;
 
-	char do_get;
-	char do_head;
-	char do_http10;
-	char *user_agent;
-	char *path;
-
-
-	int opt_retry_max;
-	int opt_ignore_cert;
-	int opt_rset;
-
-	int dns_count;
 	struct event  timeout;
-	struct timeval timeout_tv;
 	struct evutil_addrinfo hints;
 	enum readstate readstate;
 	enum writestate writestate;
-
-
-	u_char *outbuff;
 };
 
 static char line[(DEFAULT_LINE_LENGTH+1)];
@@ -104,12 +119,12 @@ static struct option longopts[]=
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
 static void write_cb(struct bufferevent *bev, void *ptr);
-void print_ssl_resp(struct ssl_state *qry);
+void print_ssl_resp(struct ssl_child *qry);
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr);
 
 static struct ssl_base *ssl_base = NULL; 
 
-void print_ssl_resp(struct ssl_state *qry) {
+void print_ssl_resp(struct ssl_child *qry) {
 	FILE *fh;
 	char addrstr[INET6_ADDRSTRLEN];
         char dst_addr_str[(INET6_ADDRSTRLEN+1)];
@@ -119,25 +134,26 @@ void print_ssl_resp(struct ssl_state *qry) {
 	int fw = get_atlas_fw_version();
 	int lts =  -1 ;//get_timesync();
 
-	if (!qry->result.size){
+	if (qry->result->size == 0){
 		AS("RESULT { ");
-		if(qry->str_Atlas) 
+		if(qry->p->str_Atlas) 
 		{
-			JS(id, qry->str_Atlas);
+			JS(id, qry->p->str_Atlas);
 		}
 		JD(fw, fw);
-		if (qry->opt_rset){
-			JS1(time, %ld, qry->start_time.tv_sec);
-			JD(lts,lts);
-			AS("\"resultset\" : [ {"); } 
-	} else if(qry->opt_rset) {
+		JD(dnscout, qry->p->dns_count);
+		JS1(time, %ld, qry->p->start_time.tv_sec);
+		JD(lts,lts); // fix me take lts when I create start time.
+		AS("\"resultset\" : [ {");
+	} 
+	else {
 		AS (",{");
 	}
 
 	JS1(time, %ld,  qry->start_time.tv_sec);
 	JD(lts,lts);
 
-	if (qry->addr_curr->ai_family && qry->host){
+	if (qry->addr_curr->ai_family && qry->p->host){
 
 		switch (qry->addr_curr->ai_family) 
 		{
@@ -149,13 +165,19 @@ void print_ssl_resp(struct ssl_state *qry) {
 			break; 
 		}
 		inet_ntop (qry->addr_curr->ai_family, ptr, addrstr, INET6_ADDRSTRLEN);
-		if(strcmp(addrstr, qry->host)) {
-			JS(dst_name, qry->host);
+		if(strcmp(addrstr, qry->p->host)) {
+			JS(dst_name, qry->p->host);
 		}
 		JS(dst_addr , addrstr);
-		JD(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4); 
-	} else if (qry->host) {
-		JS(dst_name, qry->host);
+		// JD(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4);
+	}
+	else if (qry->p->host) {
+		JS(dst_name, qry->p->host);
+	}
+
+	if (qry->ssl_ctx != NULL) {
+		JS(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
+		JS(version, SSL_CIPHER_get_version(SSL_get_current_cipher(qry->ssl)));
 	}
 
 	if(qry->retry) {
@@ -165,41 +187,40 @@ void print_ssl_resp(struct ssl_state *qry) {
 	if(qry->err.size) 
 	{
 		AS(", \"error\" : {");
-		buf_add(&qry->result,qry->err.buf, qry->err.size);
+		buf_add(qry->result, qry->err.buf, qry->err.size);
 		AS("}"); 
 	}
 	AS (" }"); //result 
 
-	/* end of result only JSON closing brackets from here on */
+	qry->p->active--;
 
-	if(qry->opt_rset) {
-		AS("}");  /* resultset : [{ } */
-	}
-	else {
+	if (qry->p->active < 1) {
 		write_out = TRUE;
 	}
 
-	if(write_out && qry->result.size){
-		if (qry->out_filename)
+	if(write_out && qry->result->size){
+		/* end of result only JSON closing brackets from here on */
+		AS("]");  /* resultset : [{}..] */
+
+		if (qry->p->out_filename)
 		{
-			fh= fopen(qry->out_filename, "a");
+			fh= fopen(qry->p->out_filename, "a");
 			if (!fh) {
 				crondlog(LVL8 "unable to append to '%s'",
-						qry->out_filename);
+						qry->p->out_filename);
 			}
 		}
 		else
 			fh = stdout;
 		if (fh) {
 			AS (" }\n");   /* RESULT { } */
-			fwrite(qry->result.buf, qry->result.size, 1 , fh);
+			fwrite(qry->result->buf, qry->result->size, 1 , fh);
 		}
-		buf_cleanup(&qry->result);
+		buf_cleanup(qry->result);
 
-		if (qry->out_filename)
+		if (qry->p->out_filename)
 			fclose(fh);
 	}
-
 
 	qry->retry = 0;
 	//free_qry_inst(qry);
@@ -208,7 +229,7 @@ void print_ssl_resp(struct ssl_state *qry) {
 static void timeout_cb(int unused  UNUSED_PARAM, const short event
 		UNUSED_PARAM, void *h)
 {
-	struct ssl_state *qry = h;
+	struct ssl_child *qry = h;
 	crondlog(LVL9, "timeout called");
 	printf("timeout called");
 	event_base_loopexit(EventBase, NULL);
@@ -272,7 +293,8 @@ static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
 		       "which looks good to me:\n%s\n",
 		       host, cert_str);
 		return 1;
-	} else {
+	}
+	else {
 		printf("Got '%s' for hostname '%s' and certificate:\n%s\n",
 		       res_str, host, cert_str);
 		return 1;
@@ -289,7 +311,7 @@ static void msecstotv(time_t msecs, struct timeval *tv)
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 {
-	struct ssl_state *qry = ptr;
+	struct ssl_child *qry = ptr;
 	struct timeval rectime ;
 
 	if (events & BEV_EVENT_CONNECTED)
@@ -326,7 +348,7 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 	off_t cLength;
 	struct stat sb;
 	struct timeval endtime;
-	struct ssl_state  *qry = ptr;
+	struct ssl_child *qry = ptr;
 
 	printf("%s: start:\n", __func__);
 
@@ -344,14 +366,14 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 		case WRITE_HEADER:
 			output= bufferevent_get_output(bev);
 			evbuffer_add_printf(output, "%s %s HTTP/1.%c\r\n",
-				qry->do_get ? "GET" :
-				qry->do_head ? "HEAD" : "POST", qry->path,
-				qry->do_http10 ? '0' : '1');
+				qry->p->do_get ? "GET" :
+				qry->p->do_head ? "HEAD" : "POST", qry->p->path,
+				qry->p->do_http10 ? '0' : '1');
 			evbuffer_add_printf(output, "Host: %s\r\n",
-				qry->host);
+				qry->p->host);
 			evbuffer_add_printf(output, "Connection: close\r\n");
 			evbuffer_add_printf(output, "User-Agent: %s\r\n",
-				qry->user_agent);
+				qry->p->user_agent);
 			evbuffer_add_printf(output, "\r\n");
 
 			qry->writestate = WRITE_DONE;
@@ -381,26 +403,28 @@ static void ssl_base_new(struct event_base *event_base)
 	ssl_base = xzalloc(sizeof( struct ssl_base));
 }
 
-static void ssl_delete (struct ssl_state *qry )
+static void ssl_delete (struct ssl_child *qry )
 {
 }
 
-static bool ssl_arg_validate (int argc, char *argv[], struct ssl_state *qry )
+static bool ssl_arg_validate (int argc, char *argv[], struct ssl_child *qry )
 {
 	if (optind != argc-1)  {
 		crondlog(LVL9 "ERROR no server IP address in input");
 		ssl_delete(qry);
 		return FALSE;
-	} else {
-		qry->host = strdup(argv[optind]); 
+	}
+	else {
+		qry->p->host = strdup(argv[optind]); 
 	}
 	return TRUE;
 }
 
-static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(void *state))
+/* eperd call this to initialize */
+static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(void *state))
 {
 	int c;
-	struct ssl_state *qry = NULL;
+	struct ssl_state *pqry = NULL;
 	LogFile = "/dev/tty";
 
 	if (ssl_base == NULL)
@@ -411,7 +435,24 @@ static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(voi
 		return NULL;
 	}
 
-	qry=xzalloc(sizeof(*qry));
+	/* initialize a query object */
+	pqry = xzalloc(sizeof(*qry));
+	pqry->retry  = 0;
+	pqry->opt_retry_max = 0;
+	pqry->opt_rset = 1;
+	pqry->port = "443";
+	pqry->opt_ignore_cert = 0;
+	buf_init(&pqry->err, -1);
+	buf_init(&pqry->result, -1);
+	pqry->do_http10= 0;
+	pqry->do_get= 0;
+	pqry->do_head= 1;
+	pqry->user_agent= "httpget for atlas.ripe.net";
+	pqry->path = "/";
+	pqry->ttc = 0;
+	pqry->triptime = 0;
+	pqry->result = xzalloc(sizeof(struct buf));
+	pqry->ref_cnt = xzalloc(sizeof(int));
 
 	optind = 0;
 	while (c= getopt_long(argc, argv, "46:A:?", longopts, NULL), c != -1) {
@@ -419,67 +460,76 @@ static struct ssl_state * sslping_init (int argc, char *argv[], void (*done)(voi
 		}
 	}
 
-	if (!ssl_arg_validate(argc, argv, qry))
+	if (!ssl_arg_validate(argc, argv, pqry))
 	{
 		crondlog(LVL8 "ssl_arg_validate failed");
 		return NULL; 
+	} 
+
+	evtimer_assign(&qry->timeout, EventBase, timeout_cb, pqry);
+
+	return pqry;
+}
+                
+static bool ssl_child_init(struct ssl_state pqry, struct evutil_addrinfo *addr_curr) 
+{
+	struct  ssl_child *qry = xzalloc(sizeof(struct ssl_child));
+	qry->serial = 0;
+	if (pqry->c != NULL) {
+		c->serial = pqry->next->serial + 1;
 	}
-	qry->retry  = 0;
-	qry->opt_retry_max = 0;
-	qry->opt_rset = 0;
-	qry->port = "443";
-	qry->opt_ignore_cert = 0;
-	buf_init(&qry->err, -1);
-	buf_init(&qry->result, -1);
-	qry->do_http10= 0;
-	qry->do_get= 0;
-	qry->do_head= 1;
-	qry->user_agent= "httpget for atlas.ripe.net";
-	qry->path = "/";
-	qry->ttc = 0;
-	qry->triptime = 0;
-
-	evtimer_assign(&qry->timeout, EventBase, timeout_cb, qry);
-
-
-	return qry;
+	c->next = pqry->c;
+	pqry->c = c;
+	c->addr_curr = addr_curr;
+	c->p = pqry;
 }
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 {
-	struct ssl_state *qry = ctx;
+	struct ssl_parent *pqry = (struct ssl_state *) ctx;
 	struct bufferevent *bev;
 	struct evutil_addrinfo *cur;
 
 	if (result != 0)
 	{
 		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"EVDNS\" : \"%s\"",
-				qry->err.size ? ", " : "",
+				pqry->err.size ? ", " : "",
 				evutil_gai_strerror(result));
 		buf_add(&qry->err, line, strlen(line));
-		print_ssl_resp(qry);
+		print_ssl_resp(pqry);
+		buf_add(&pqry->err, line, strlen(line));
+		// fixme print_ssl_resp(qry);
 		return;
 	}
-	qry->addr = res;
-	qry->dns_count =  0;
-	for (cur= res; cur; cur= cur->ai_next)
-		qry->dns_count++;
+	pqry->addr = res;
+	pqry->dns_count =  0;
+	pqry->serial = 1;
 
-	ssl_q_start(qry);
+	for (cur = res; cur != NULL; cur = cur->ai_next) {
+		pqry->dns_count++;
+		pqry->active++; // fixme to check max allowed queries
+		ssl_child_init(pqry, cur);
+		if (qry->c != NULL) {
+			ssl_q_start(pqry->c);
+		}
+	}
 }
 
-void ssl_start (struct ssl_state *qry)
+/* entry point for eperd */
+ 
+void ssl_start (struct ssl_state *pqry)
 {
-	gettimeofday(&qry->start_time, NULL);
-	qry->hints.ai_family = AF_UNSPEC;
-	qry->hints.ai_flags = 0;
-	qry->hints.ai_socktype = SOCK_DGRAM;
-	qry->hints.ai_flags = 0;
+	gettimeofday(&pqry->start_time, NULL);
+	pqry->hints.ai_family = AF_UNSPEC;
+	pqry->hints.ai_flags = 0;
+	pqry->hints.ai_socktype = SOCK_STREAM;
+	pqry->hints.ai_flags = 0;
 
-	(void) evdns_getaddrinfo(DnsBase, qry->host, "443", &qry->hints, dns_cb, 
-			qry);
-}
-void ssl_q_start (struct ssl_state *qry) 
+	(void) evdns_getaddrinfo(DnsBase, pqry->host, "443", &qry->hints,
+			dns_cb, qry);
+} 
+
+void ssl_q_start (struct ssl_child *qry) 
 {
 	int r = RAND_poll();
 
@@ -494,7 +544,14 @@ void ssl_q_start (struct ssl_state *qry)
 	}
 
 	/* Create a new OpenSSL context */
-	qry->ssl_ctx = SSL_CTX_new(SSLv23_method());
+	// qry->ssl_ctx = SSL_CTX_new(SSLv23_method());
+	
+	qry->ssl_ctx = SSL_CTX_new(TLSv1_method());
+
+
+//	SSL_CTX_set_cipher_list(qry->ssl_ctx, "ALL:COMPLEMENTOFALL");
+	SSL_CTX_set_cipher_list(qry->ssl_ctx, "HIGH");
+
 	if (!qry->ssl_ctx)
 		crondlog(LVL9, "SSL_CTX_new");
 
@@ -547,20 +604,18 @@ void ssl_q_start (struct ssl_state *qry)
 			BUFFEREVENT_SSL_CONNECTING,
 			BEV_OPT_CLOSE_ON_FREE);
 
-	bufferevent_openssl_set_allow_dirty_shutdown(qry->bev, 1);
+	//bufferevent_openssl_set_allow_dirty_shutdown(qry->bev, 1);
 	bufferevent_setcb(qry->bev, http_read_cb, write_cb, event_cb, qry);
 
-	for (qry->addr_curr = qry->addr; qry->addr_curr;
-			qry->addr_curr = qry->addr_curr->ai_next) {
-		if (bufferevent_socket_connect(qry->bev,
-					qry->addr_curr->ai_addr,
-					qry->addr_curr->ai_addrlen)) {
-			crondlog(LVL9, "bufferevent_socket_connect error");
-			bufferevent_free(qry->bev);
-		} else{
-			gettimeofday(&qry->start_time, NULL);
-			break;
-		}
+	if (bufferevent_socket_connect(qry->bev,
+				qry->addr_curr->ai_addr,
+				qry->addr_curr->ai_addrlen)) {
+		crondlog(LVL9, "bufferevent_socket_connect error");
+		bufferevent_free(qry->bev);
+	}
+	else{
+		gettimeofday(&qry->start_time, NULL);
+		/* AA fixme error */
 	}
 
 	if (r < 0) {
@@ -572,8 +627,8 @@ void ssl_q_start (struct ssl_state *qry)
 	return;
 }
 
-int evsslping_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-int evsslping_main(int argc, char **argv)
+int evsslscan_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
+int evsslscan_main(int argc, char **argv)
 {
 	struct ssl_state *qry = NULL;
 
@@ -590,10 +645,10 @@ int evsslping_main(int argc, char **argv)
 		return 1;
 	}
 
-	qry = sslping_init(argc, argv, local_exit);
+	qry = sslscan_init(argc, argv, local_exit);
 
 	if(qry == NULL) {
-		crondlog(DIE9 "ERROR: critical sslping_init failed"); /* exits */
+		crondlog(DIE9 "ERROR: critical sslscan_init failed"); /* exits */
 		event_base_free (EventBase);
 		return 1;
 	}
