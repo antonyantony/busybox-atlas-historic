@@ -3115,7 +3115,7 @@
      "\n	-s ADDR	Start address" \
 
 #define nanddump_trivial_usage \
-	"[-o] [--bb=padbad|skipbad] [-s ADDR] [-l LEN] [-f FILE] MTD_DEVICE" \
+	"[-o]" IF_LONG_OPTS(" [--bb=padbad|skipbad]") " [-s ADDR] [-l LEN] [-f FILE] MTD_DEVICE" \
 
 #define nanddump_full_usage "\n\n" \
 	"Dump MTD_DEVICE\n" \
@@ -3123,9 +3123,11 @@
      "\n	-s ADDR	Start address" \
      "\n	-l LEN	Length" \
      "\n	-f FILE	Dump to file ('-' for stdout)" \
+     IF_LONG_OPTS( \
      "\n	--bb=METHOD:" \
      "\n		skipbad: skip bad blocks" \
      "\n		padbad: substitute bad blocks by 0xff (default)" \
+     ) \
 
 #define raidautorun_trivial_usage \
        "DEVICE" \
