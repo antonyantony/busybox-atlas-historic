@@ -43,6 +43,7 @@
 
 #define URANDOM_DEV	"/dev/urandom"
 #define ATLAS_FW_VERSION	"/home/atlas/state/FIRMWARE_APPS_VERSION"
+#define DebugOpt 8
 
 struct CronLine {
 	struct CronLine *cl_Next;
@@ -81,14 +82,7 @@ enum {
 	OPT_A = (1 << 5),
 	OPT_D = (1 << 6),
 	OPT_P = (1 << 7),
-	OPT_d = (1 << 8) * ENABLE_FEATURE_CROND_D,
 };
-#if ENABLE_FEATURE_CROND_D
-#define DebugOpt (option_mask32 & OPT_d)
-#else
-#define DebugOpt 0
-#endif
-
 
 struct globals G;
 #define INIT_G() do { \
@@ -166,7 +160,7 @@ int get_atlas_fw_version(void)
 static void my_exit(void)
 {
 	crondlog(LVL8 "in my_exit (exit was called!)");
-	abort();
+	exit(1);
 }
 
 static void kick_watchdog(void)
@@ -241,14 +235,14 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 
 	INIT_G();
 
+	opt_complementary = "S-L:L-S:"; /* -l and -d have numeric param */
+	opt = getopt32(argv, "il:L:fSc:A:DP:O:",
+			&LogLevel, &LogFile, &CDir, &atlas_id, &PidFileName
+			,&out_filename);
+
 	/* "-b after -f is ignored", and so on for every pair a-b */
-	opt_complementary = "f-b:b-f:S-L:L-S" IF_FEATURE_PERD_D(":d-l")
-			"i:+:l+:d+"; /* -i, -l and -d have numeric param */
-	opt = getopt32(argv, "i:l:L:fc:A:DP:" IF_FEATURE_EPERD_D("d:") "O:",
-			&instance_id, &LogLevel, &LogFile, &CDir,
-			&atlas_id, &PidFileName
-			IF_FEATURE_EPERD_D(,&LogLevel), &out_filename);
 	/* both -d N and -l N set the same variable: LogLevel */
+
 
 	if (out_filename && !validate_filename(out_filename, ATLAS_DATA_NEW))
 	{
