@@ -267,6 +267,8 @@ make_new_session(
 	ndelay_on(fd);
 #endif /* ATLAS */
 
+	/* SO_KEEPALIVE by popular demand */
+	setsockopt_keepalive(sock);
 #if ENABLE_FEATURE_TELNETD_STANDALONE
 	ts->sockfd_read = sock;
 	/* SO_KEEPALIVE by popular demand */
@@ -486,6 +488,7 @@ static void handle_sigchld(int sig UNUSED_PARAM)
 		while (ts) {
 			if (ts->shell_pid == pid) {
 				ts->shell_pid = -1;
+				update_utmp_DEAD_PROCESS(pid);
 				break;
 			}
 			ts = ts->next;
@@ -1002,6 +1005,8 @@ skip3a:
 			atlas_ts= NULL;
 		}
 #endif /* ATLAS */
+		if (ts->shell_pid > 0)
+			update_utmp_DEAD_PROCESS(ts->shell_pid);
 		free_session(ts);
 		ts = next;
 	}

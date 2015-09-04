@@ -201,10 +201,13 @@
        "$ dpkg-deb -X ./busybox_0.48-1_i386.deb /tmp\n" \
 
 #define gzip_trivial_usage \
-       "[-cfd] [FILE]..." \
+       "[-cfd" IF_FEATURE_GZIP_LEVELS("123456789") "] [FILE]..." \
 
 #define gzip_full_usage "\n\n" \
        "Compress FILEs (or stdin)\n" \
+	IF_FEATURE_GZIP_LEVELS( \
+     "\n	-1..9	Compression level" \
+	) \
      "\n	-d	Decompress" \
      "\n	-c	Write to stdout" \
      "\n	-f	Force" \
@@ -404,7 +407,7 @@
        "< keymap" \
 
 #define loadkmap_full_usage "\n\n" \
-       "Load a binary keyboard translation table from stdin\n" \
+       "Load a binary keyboard translation table from stdin" \
 
 #define loadkmap_example_usage \
        "$ loadkmap < /etc/i18n/lang-keymap\n" \
@@ -471,7 +474,7 @@
        "FILE [SUFFIX]" \
 
 #define basename_full_usage "\n\n" \
-       "Strip directory path and .SUFFIX from FILE\n" \
+       "Strip directory path and .SUFFIX from FILE" \
 
 #define basename_example_usage \
        "$ basename /usr/local/bin/foo\n" \
@@ -555,7 +558,7 @@
        "-r--r--r--    1 root     root            0 Apr 12 18:25 /tmp/foo\n" \
 
 #define chown_trivial_usage \
-       "[-RhLHP"IF_DESKTOP("cvf")"]... OWNER[<.|:>[GROUP]] FILE..." \
+       "[-Rh"IF_DESKTOP("LHPcvf")"]... OWNER[<.|:>[GROUP]] FILE..." \
 
 #define chown_full_usage "\n\n" \
        "Change the owner and/or group of each FILE to OWNER and/or GROUP\n" \
@@ -714,8 +717,12 @@
      "\n	conv=fsync	Physically write data out before finishing" \
      "\n	conv=swab	Swap every pair of bytes" \
 	) \
+	IF_FEATURE_DD_STATUS( \
+     "\n	status=noxfer	Suppress rate output" \
+     "\n	status=none	Suppress all output" \
+	) \
      "\n" \
-     "\nN may be suffixed by c (1), w (2), b (512), kD (1000), k (1024), MD, M, GD, G" \
+     "\nN may be suffixed by c (1), w (2), b (512), kB (1000), k (1024), MB, M, GB, G" \
 
 #define dd_example_usage \
        "$ dd if=/dev/zero of=/dev/ram1 bs=1M count=4\n" \
@@ -920,11 +927,9 @@
        "\\( and \\) or null; if \\( and \\) are not used, they return the number\n" \
        "of characters matched or 0." \
 
-#define false_trivial_usage \
-       "" \
+#define false_trivial_usage NOUSAGE_STR \
 
-#define false_full_usage "\n\n" \
-       "Return an exit code of FALSE (1)" \
+#define false_full_usage "" \
 
 #define false_example_usage \
        "$ false\n" \
@@ -1521,10 +1526,17 @@
      "\n	-s	Use System V sum algorithm (512byte blocks)" \
 
 #define sync_trivial_usage \
-       "" \
+       ""IF_FEATURE_SYNC_FANCY("[-df] [FILE]...") \
 
 #define sync_full_usage "\n\n" \
+    IF_NOT_FEATURE_SYNC_FANCY( \
        "Write all buffered blocks to disk" \
+    ) \
+    IF_FEATURE_SYNC_FANCY( \
+       "Write all buffered blocks (in FILEs) to disk" \
+     "\n	-d	Avoid syncing metadata" \
+     "\n	-f	Sync filesystems underlying FILEs" \
+    ) \
 
 #define tac_trivial_usage \
 	"[FILE]..." \
@@ -1568,12 +1580,9 @@
        "$ cat /tmp/foo\n" \
        "Hello\n" \
 
-#define test_trivial_usage \
-       "EXPRESSION ]" \
+#define test_trivial_usage NOUSAGE_STR \
 
-#define test_full_usage "\n\n" \
-       "Check file types, compare values etc. Return a 0/1 exit code\n" \
-       "depending on logical value of EXPRESSION" \
+#define test_full_usage "" \
 
 #define test_example_usage \
        "$ test 1 -eq 2\n" \
@@ -1624,16 +1633,25 @@
        "$ echo \"gdkkn vnqkc\" | tr [a-y] [b-z]\n" \
        "hello world\n" \
 
-#define true_trivial_usage \
-       "" \
+#define true_trivial_usage NOUSAGE_STR \
 
-#define true_full_usage "\n\n" \
-       "Return an exit code of TRUE (0)" \
+#define true_full_usage "" \
 
 #define true_example_usage \
        "$ true\n" \
        "$ echo $?\n" \
        "0\n" \
+
+#define truncate_trivial_usage \
+       "[-c] -s SIZE FILE..." \
+
+#define truncate_full_usage "\n\n" \
+	"Truncate FILEs to the given size\n" \
+	"\n	-c	Do not create files" \
+	"\n	-s SIZE	Truncate to SIZE" \
+
+#define truncate_example_usage \
+	"$ truncate -s 1G foo" \
 
 #define tty_trivial_usage \
        "" \
@@ -2529,7 +2547,7 @@
 	) \
 
 #define deluser_trivial_usage \
-       "USER" \
+       IF_LONG_OPTS("[--remove-home] ") "USER" \
 
 #define deluser_full_usage "\n\n" \
        "Delete USER from the system" \
@@ -2929,6 +2947,77 @@
      "\n	-Z	Disable Seagate auto-powersaving mode" \
      "\n	-z	Reread partition table" \
 
+#define i2cget_trivial_usage \
+       "[-f] [-y] BUS CHIP-ADDRESS [DATA-ADDRESS [MODE]]" \
+
+#define i2cget_full_usage "\n\n" \
+       "Read from I2C/SMBus chip registers\n" \
+     "\n	I2CBUS	i2c bus number" \
+     "\n	ADDRESS	0x03 - 0x77" \
+     "\nMODE is:" \
+     "\n	b	read byte data (default)" \
+     "\n	w	read word data" \
+     "\n	c	write byte/read byte" \
+     "\n	Append p for SMBus PEC" \
+     "\n" \
+     "\n	-f	force access" \
+     "\n	-y	disable interactive mode" \
+
+#define i2cset_trivial_usage \
+       "[-f] [-y] [-m MASK] BUS CHIP-ADDR DATA-ADDR [VALUE] ... [MODE]" \
+
+#define i2cset_full_usage "\n\n" \
+       "Set I2C registers\n" \
+     "\n	I2CBUS	i2c bus number" \
+     "\n	ADDRESS	0x03 - 0x77" \
+     "\nMODE is:" \
+     "\n	c	byte, no value" \
+     "\n	b	byte data (default)" \
+     "\n	w	word data" \
+     "\n	i	I2C block data" \
+     "\n	s	SMBus block data" \
+     "\n	Append p for SMBus PEC" \
+     "\n" \
+     "\n	-f	force access" \
+     "\n	-y	disable interactive mode" \
+     "\n	-r	read back and compare the result" \
+     "\n	-m MASK	mask specifying which bits to write" \
+
+#define i2cdump_trivial_usage \
+       "[-f] [-r FIRST-LAST] [-y] BUS ADDR [MODE]" \
+
+#define i2cdump_full_usage "\n\n" \
+       "Examine I2C registers\n" \
+     "\n	I2CBUS	i2c bus number" \
+     "\n	ADDRESS	0x03 - 0x77" \
+     "\nMODE is:" \
+     "\n	b	byte (default)" \
+     "\n	w	word" \
+     "\n	W	word on even register addresses" \
+     "\n	i	I2C block" \
+     "\n	s	SMBus block" \
+     "\n	c	consecutive byte" \
+     "\n	Append p for SMBus PEC" \
+     "\n" \
+     "\n	-f	force access" \
+     "\n	-y	disable interactive mode" \
+     "\n	-r	limit the number of registers being accessed" \
+
+#define i2cdetect_trivial_usage \
+       "[-F I2CBUS] [-l] [-y] [-a] [-q|-r] I2CBUS [FIRST LAST]" \
+
+#define i2cdetect_full_usage "\n\n" \
+       "Detect I2C chips.\n" \
+     "\n	I2CBUS	i2c bus number" \
+     "\n	FIRST and LAST limit the probing range" \
+     "\n" \
+     "\n	-l	output list of installed busses" \
+     "\n	-y	disable interactive mode" \
+     "\n	-a	force scanning of non-regular addresses" \
+     "\n	-q	use smbus quick write commands for probing (default)" \
+     "\n	-r	use smbus read byte commands for probing" \
+     "\n	-F	display list of functionalities" \
+
 #define inotifyd_trivial_usage \
 	"PROG FILE1[:MASK]..." \
 
@@ -2977,7 +3066,8 @@
 	) \
 
 #define less_trivial_usage \
-       "[-E" IF_FEATURE_LESS_REGEXP("I")IF_FEATURE_LESS_FLAGS("Mm") "Nh~] [FILE]..." \
+       "[-E" IF_FEATURE_LESS_REGEXP("I")IF_FEATURE_LESS_FLAGS("Mm") \
+       "N" IF_FEATURE_LESS_TRUNCATE("S") "h~] [FILE]..." \
 
 #define less_full_usage "\n\n" \
        "View FILE (or stdin) one screenful at a time\n" \
@@ -2990,6 +3080,9 @@
      "\n		and percentage through the file" \
 	) \
      "\n	-N	Prefix line number to each line" \
+	IF_FEATURE_LESS_TRUNCATE( \
+     "\n	-S	Truncate long lines" \
+	) \
      "\n	-~	Suppress ~s displayed past EOF" \
 
 #if ENABLE_FEATURE_MAKEDEVS_LEAF \
@@ -3261,12 +3354,13 @@
        "Print dimension(s) of stdin's terminal, on error return 80x25" \
 
 #define ubiattach_trivial_usage \
-       "-m MTD_NUM [-d UBI_NUM] UBI_CTRL_DEV" \
+       "-m MTD_NUM [-d UBI_NUM] [-O VID_HDR_OFF] UBI_CTRL_DEV" \
 
 #define ubiattach_full_usage "\n\n" \
        "Attach MTD device to UBI\n" \
      "\n	-m MTD_NUM	MTD device number to attach" \
      "\n	-d UBI_NUM	UBI device number to assign" \
+     "\n	-O VID_HDR_OFF	VID header offset" \
 
 #define ubidetach_trivial_usage \
        "-d UBI_NUM UBI_CTRL_DEV" \
@@ -3577,11 +3671,11 @@
      "\n	-f		Quit on first ARP reply" \
      "\n	-q		Quiet" \
      "\n	-b		Keep broadcasting, don't go unicast" \
-     "\n	-D		Duplicated address detection mode" \
+     "\n	-D		Exit with 1 if DST_IP replies" \
      "\n	-U		Unsolicited ARP mode, update your neighbors" \
      "\n	-A		ARP answer mode, update your neighbors" \
      "\n	-c N		Stop after sending N ARP requests" \
-     "\n	-w TIMEOUT	Time to wait for ARP reply, seconds" \
+     "\n	-w TIMEOUT	Seconds to wait for ARP reply" \
      "\n	-I IFACE	Interface to use (default eth0)" \
      "\n	-s SRC_IP	Sender IP address" \
      "\n	DST_IP		Target IP address" \
@@ -3873,7 +3967,7 @@
        "		[dev STRING] [to PREFIX] }" \
 
 #define ipaddr_full_usage "\n\n" \
-       "ipaddr {add|delete} IFADDR dev STRING\n" \
+       "ipaddr {add|change|replace|delete} IFADDR dev STRING\n" \
        "ipaddr {show|flush} [dev STRING] [scope SCOPE-ID]\n" \
        "	[to PREFIX] [label PATTERN]\n" \
        "	IFADDR := PREFIX | ADDR peer PREFIX\n" \
@@ -3926,7 +4020,8 @@
        "	[ttl TTL] [tos TOS] [[no]pmtudisc] [dev PHYS_DEV]" \
 
 #define ipcalc_trivial_usage \
-       "[OPTIONS] ADDRESS[[/]NETMASK] [NETMASK]" \
+       "[OPTIONS] ADDRESS" \
+       IF_FEATURE_IPCALC_FANCY("[/PREFIX]") " [NETMASK]" \
 
 #define ipcalc_full_usage "\n\n" \
        "Calculate IP network settings from a IP address\n" \
@@ -4130,14 +4225,15 @@
      "\n	-q	Quit after clock is set" \
      "\n	-N	Run at high priority" \
      "\n	-w	Do not set time (only query peers), implies -n" \
-	IF_FEATURE_NTPD_SERVER( \
-     "\n	-l	Run as server on port 123" \
-     "\n	-I IFACE Bind server to IFACE, implies -l" \
-	) \
      "\n	-S PROG	Run PROG after stepping time, stratum change, and every 11 mins" \
      "\n	-p PEER	Obtain time from PEER (may be repeated)" \
 	IF_FEATURE_NTPD_CONF( \
-     "\n		If -p is not given, read /etc/ntp.conf" \
+     "\n		If -p is not given, 'server HOST' lines" \
+     "\n		from /etc/ntp.conf are used" \
+	) \
+	IF_FEATURE_NTPD_SERVER( \
+     "\n	-l	Also run as server on port 123" \
+     "\n	-I IFACE Bind server to IFACE, implies -l" \
 	) \
 
 #if !ENABLE_FEATURE_FANCY_PING \
@@ -4353,8 +4449,9 @@
      "\n	-l	Log to syslog (inetd mode requires this)" \
 
 #define traceroute_trivial_usage \
-       "[-"IF_TRACEROUTE6("46")"FIldnrv] [-f 1ST_TTL] [-m MAXTTL] [-p PORT] [-q PROBES]\n" \
-       "	[-s SRC_IP] [-t TOS] [-w WAIT_SEC] [-g GATEWAY] [-i IFACE]\n" \
+       "[-"IF_TRACEROUTE6("46")"FIlnrv] [-f 1ST_TTL] [-m MAXTTL] [-q PROBES] [-p PORT]\n" \
+       "	[-t TOS] [-w WAIT_SEC]" \
+       IF_FEATURE_TRACEROUTE_SOURCE_ROUTE(" [-g GATEWAY]")" [-s SRC_IP] [-i IFACE]\n" \
        "	[-z PAUSE_MSEC] HOST [BYTES]" \
 
 #define traceroute_full_usage "\n\n" \
@@ -4362,40 +4459,47 @@
 	IF_TRACEROUTE6( \
      "\n	-4,-6	Force IP or IPv6 name resolution" \
 	) \
-     "\n	-F	Set the don't fragment bit" \
+     "\n	-F	Set don't fragment bit" \
+	IF_FEATURE_TRACEROUTE_USE_ICMP( \
      "\n	-I	Use ICMP ECHO instead of UDP datagrams" \
-     "\n	-l	Display the TTL value of the returned packet" \
-     "\n	-d	Set SO_DEBUG options to socket" \
+	) \
+     "\n	-l	Display TTL value of the returned packet" \
      "\n	-n	Print numeric addresses" \
      "\n	-r	Bypass routing tables, send directly to HOST" \
+	IF_FEATURE_TRACEROUTE_VERBOSE( \
      "\n	-v	Verbose" \
-     "\n	-m	Max time-to-live (max number of hops)" \
-     "\n	-p	Base UDP port number used in probes" \
+	) \
+     "\n	-f N	First number of hops (default 1)" \
+     "\n	-m N	Max number of hops" \
+     "\n	-q N	Number of probes per hop (default 3)" \
+     "\n	-p N	Base UDP port number used in probes" \
      "\n		(default 33434)" \
-     "\n	-q	Number of probes per TTL (default 3)" \
-     "\n	-s	IP address to use as the source address" \
-     "\n	-t	Type-of-service in probe packets (default 0)" \
-     "\n	-w	Time in seconds to wait for a response (default 3)" \
-     "\n	-g	Loose source route gateway (8 max)" \
+     "\n	-s IP	Source address" \
+     "\n	-i IFACE Source interface" \
+     "\n	-t N	Type-of-service in probe packets (default 0)" \
+     "\n	-w SEC	Time to wait for a response (default 3)" \
+     "\n	-g IP	Loose source route gateway (8 max)" \
 
 #define traceroute6_trivial_usage \
-       "[-dnrv] [-m MAXTTL] [-p PORT] [-q PROBES]\n" \
-       "	[-s SRC_IP] [-t TOS] [-w WAIT_SEC] [-i IFACE]\n" \
+       "[-nrv] [-m MAXTTL] [-q PROBES] [-p PORT]\n" \
+       "	[-t TOS] [-w WAIT_SEC] [-s SRC_IP] [-i IFACE]\n" \
        "	HOST [BYTES]" \
 
 #define traceroute6_full_usage "\n\n" \
        "Trace the route to HOST\n" \
-     "\n	-d	Set SO_DEBUG options to socket" \
      "\n	-n	Print numeric addresses" \
      "\n	-r	Bypass routing tables, send directly to HOST" \
+	IF_FEATURE_TRACEROUTE_VERBOSE( \
      "\n	-v	Verbose" \
-     "\n	-m	Max time-to-live (max number of hops)" \
-     "\n	-p	Base UDP port number used in probes" \
-     "\n		(default is 33434)" \
-     "\n	-q	Number of probes per TTL (default 3)" \
-     "\n	-s	IP address to use as the source address" \
-     "\n	-t	Type-of-service in probe packets (default 0)" \
-     "\n	-w	Time in seconds to wait for a response (default 3)" \
+	) \
+     "\n	-m N	Max number of hops" \
+     "\n	-q N	Number of probes per hop (default 3)" \
+     "\n	-p N	Base UDP port number used in probes" \
+     "\n		(default 33434)" \
+     "\n	-s IP	Source address" \
+     "\n	-i IFACE Source interface" \
+     "\n	-t N	Type-of-service in probe packets (default 0)" \
+     "\n	-w SEC	Time wait for a response (default 3)" \
 
 #define tunctl_trivial_usage \
        "[-f device] ([-t name] | -d name)" IF_FEATURE_TUNCTL_UG(" [-u owner] [-g group] [-b]") \
@@ -4694,7 +4798,7 @@
        "" \
 
 #define powertop_full_usage "\n\n" \
-       "Analyze power consumption on Intel-based laptops\n" \
+       "Analyze power consumption on Intel-based laptops" \
 
 #if ENABLE_DESKTOP \
 
@@ -4765,7 +4869,7 @@
        "PID..." \
 
 #define pwdx_full_usage "\n\n" \
-       "Show current directory for PIDs\n" \
+       "Show current directory for PIDs" \
 
 #define renice_trivial_usage \
        "{{-n INCREMENT} | PRIORITY} [[-p | -g | -u] ID...]" \
@@ -5204,11 +5308,12 @@
        "$ logger \"hello\"\n" \
 
 #define logread_trivial_usage \
-       "[-f]" \
+       "[-fF]" \
 
 #define logread_full_usage "\n\n" \
        "Show messages in syslogd's circular buffer\n" \
      "\n	-f	Output data as log grows" \
+     "\n	-F	Same as -f, but dump buffer first" \
 
 #define syslogd_trivial_usage \
        "[OPTIONS]" \
@@ -5299,6 +5404,7 @@
      "\n	-c		Clear ring buffer after printing" \
      "\n	-n LEVEL	Set console logging level" \
      "\n	-s SIZE		Buffer size" \
+     "\n	-r		Print raw message buffer" \
 
 #define fatattr_trivial_usage \
        "[-+rhsvda] FILE..." \
@@ -5422,7 +5528,7 @@
        "	-o OFFSET	Offset in bytes to discard from" \
      "\n	-l LEN		Bytes to discard" \
      "\n	-m MIN		Minimum extent length" \
-     "\n	-v,		Print number of discarded bytes" \
+     "\n	-v		Print number of discarded bytes" \
 	) \
 
 #define getopt_trivial_usage \
@@ -5689,7 +5795,7 @@
        "$ dmesg | more\n" \
 
 #define mount_trivial_usage \
-       "[OPTIONS] [-o OPTS] DEVICE NODE" \
+       "[OPTIONS] [-o OPT] DEVICE NODE" \
 
 #define mount_full_usage "\n\n" \
        "Mount a filesystem. Filesystem autodetection requires /proc.\n" \
@@ -5712,8 +5818,10 @@
      "\n	-v		Verbose" \
 	) \
      "\n	-r		Read-only mount" \
-     "\n	-w		Read-write mount (default)" \
      "\n	-t FSTYPE[,...]	Filesystem type(s)" \
+	IF_FEATURE_MOUNT_OTHERTAB( \
+     "\n	-T FILE		Read FILE instead of /etc/fstab" \
+	) \
      "\n	-O OPT		Mount only filesystems with option OPT (-a only)" \
      "\n-o OPT:" \
 	IF_FEATURE_MOUNT_LOOP( \
@@ -5735,7 +5843,7 @@
      "\n	move		Relocate an existing mount point" \
 	) \
      "\n	remount		Remount a mounted filesystem, changing flags" \
-     "\n	ro/rw		Same as -r/-w" \
+     "\n	ro		Same as -r" \
      "\n" \
      "\nThere are filesystem-specific -o flags." \
 
@@ -5762,9 +5870,9 @@
        "[-sp] HOST" \
 
 #define rdate_full_usage "\n\n" \
-       "Get and possibly set the system date/time from a remote HOST\n" \
-     "\n	-s	Set the system date/time (default)" \
-     "\n	-p	Print the date/time" \
+       "Get and possibly set system time from a remote HOST\n" \
+     "\n	-s	Set system time (default)" \
+     "\n	-p	Print time" \
 
 #define rdev_trivial_usage \
        "" \
@@ -5807,18 +5915,18 @@
      "\n	-l,--local	Clock is set to local time" \
      "\n	-u,--utc	Clock is set to UTC time" \
      "\n	-d,--device=DEV	Specify the RTC device" \
-     "\n	-m,--mode=MODE	Set the sleep state (default: standby)" \
-     "\n	-s,--seconds=SEC Set the timeout in SEC seconds from now" \
-     "\n	-t,--time=TIME	Set the timeout to TIME seconds from epoch" \
+     "\n	-m,--mode=MODE	Set sleep state (default: standby)" \
+     "\n	-s,--seconds=SEC Set timeout in SEC seconds from now" \
+     "\n	-t,--time=TIME	Set timeout to TIME seconds from epoch" \
 	) \
 	IF_NOT_LONG_OPTS( \
      "\n	-a	Read clock mode from adjtime" \
      "\n	-l	Clock is set to local time" \
      "\n	-u	Clock is set to UTC time" \
      "\n	-d DEV	Specify the RTC device" \
-     "\n	-m MODE	Set the sleep state (default: standby)" \
-     "\n	-s SEC	Set the timeout in SEC seconds from now" \
-     "\n	-t TIME	Set the timeout to TIME seconds from epoch" \
+     "\n	-m MODE	Set sleep state (default: standby)" \
+     "\n	-s SEC	Set timeout in SEC seconds from now" \
+     "\n	-t TIME	Set timeout to TIME seconds from epoch" \
 	) \
 
 #define script_trivial_usage \
@@ -5856,7 +5964,7 @@
 #define linux64_full_usage "" \
 
 #define swapon_trivial_usage \
-       "[-a]" IF_FEATURE_SWAPON_DISCARD(" [-d[POL]]") IF_FEATURE_SWAPON_PRI(" [-p PRI]") " [DEVICE]" \
+       "[-a] [-e]" IF_FEATURE_SWAPON_DISCARD(" [-d[POL]]") IF_FEATURE_SWAPON_PRI(" [-p PRI]") " [DEVICE]" \
 
 #define swapon_full_usage "\n\n" \
        "Start swapping on DEVICE\n" \
@@ -5865,16 +5973,18 @@
      "\n	-d[POL]	Discard blocks at swapon (POL=once)," \
      "\n		as freed (POL=pages), or both (POL omitted)" \
 	) \
+     "\n	-e	Silently skip devices that do not exist" \
 	IF_FEATURE_SWAPON_PRI( \
      "\n	-p PRI	Set swap device priority" \
 	) \
 
 #define swapoff_trivial_usage \
-       "[-a] [DEVICE]" \
+       "[-a] [-e] [DEVICE]" \
 
 #define swapoff_full_usage "\n\n" \
        "Stop swapping on DEVICE\n" \
      "\n	-a	Stop swapping on all swap devices" \
+     "\n	-e	Silently skip devices that do not exist" \
 
 #define switch_root_trivial_usage \
        "[-c /dev/console] NEW_ROOT NEW_INIT [ARGS]" \
@@ -5884,6 +5994,15 @@
        "chroot to NEW_ROOT, delete all in /, move NEW_ROOT to /,\n" \
        "execute NEW_INIT. PID must be 1. NEW_ROOT must be a mountpoint.\n" \
      "\n	-c DEV	Reopen stdio to DEV after switch" \
+
+#define uevent_trivial_usage \
+       "[PROG [ARGS]]" \
+
+#define uevent_full_usage "\n\n" \
+       "uevent runs PROG for every netlink notification." \
+   "\n""PROG's environment contains data passed from the kernel." \
+   "\n""Typical usage (daemon for dynamic device node creation):" \
+   "\n""	# uevent mdev & mdev -s" \
 
 #define umount_trivial_usage \
        "[OPTIONS] FILESYSTEM|DIRECTORY" \
@@ -5905,26 +6024,6 @@
 
 #define umount_example_usage \
        "$ umount /dev/hdc1\n" \
-
-#define e2fsck_trivial_usage \
-       "[-panyrcdfvstDFSV] [-b superblock] [-B blocksize] " \
-       "[-I inode_buffer_blocks] [-P process_inode_size] " \
-       "[-l|-L bad_blocks_file] [-C fd] [-j external_journal] " \
-       "[-E extended-options] device" \
-
-#define e2fsck_full_usage "\n\n" \
-       "Check ext2/ext3 file system\n" \
-     "\n	-p		Automatic repair (no questions)" \
-     "\n	-n		Make no changes to the filesystem" \
-     "\n	-y		Assume 'yes' to all questions" \
-     "\n	-c		Check for bad blocks and add them to the badblock list" \
-     "\n	-f		Force checking even if filesystem is marked clean" \
-     "\n	-v		Verbose" \
-     "\n	-b superblock	Use alternative superblock" \
-     "\n	-B blocksize	Force blocksize when looking for superblock" \
-     "\n	-j journal	Set location of the external journal" \
-     "\n	-l file		Add to badblocks list" \
-     "\n	-L file		Set badblocks list" \
 
 #if defined CONFIG_UDHCP_DEBUG && CONFIG_UDHCP_DEBUG >= 1 \
 
