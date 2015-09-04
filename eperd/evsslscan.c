@@ -199,13 +199,12 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 		SSL_free(qry->ssl);
 		qry->ssl = NULL;
 	}
-	*/
 
 	if(qry->ssl_ctx !=  NULL) {
 		SSL_CTX_free(qry->ssl_ctx);
 		qry->ssl_ctx = NULL;
 	}
-
+	*/
 	evtimer_del(&qry->timeout_ev);
 }
 
@@ -266,6 +265,115 @@ static void msecstotv(time_t msecs, struct timeval *tv)
 	tv->tv_usec = msecs % 1000 * 1000;
 }
 
+/* See http://archives.seul.org/libevent/users/Jan-2013/msg00039.html */
+static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
+{
+	char cert_str[256];
+	const char *host = (const char *) arg;
+	const char *res_str = "X509_verify_cert failed";
+	HostnameValidationResult res = Error;
+
+	/* This is the function that OpenSSL would call if we hadn't called
+	 * SSL_CTX_set_cert_verify_callback().  Therefore, we are "wrapping"
+	 * the default functionality, rather than replacing it. */
+	int ok_so_far = 0;
+
+	X509 *server_cert = NULL;
+
+	/* AA  fixme
+	if (qry->opt_ignore_cert) { */
+		return 1;
+		/*
+	}
+	*/
+
+	ok_so_far = X509_verify_cert(x509_ctx);
+
+	server_cert = X509_STORE_CTX_get_current_cert(x509_ctx);
+
+	if (server_cert  == NULL) 
+		return 0;
+
+	if (ok_so_far) {
+		res = validate_hostname(host, server_cert);
+
+		switch (res) {
+		case MatchFound:
+			res_str = "MatchFound";
+			break;
+		case MatchNotFound:
+			res_str = "MatchNotFound";
+			break;
+		case NoSANPresent:
+			res_str = "NoSANPresent";
+			break;
+		case MalformedCertificate:
+			res_str = "MalformedCertificate";
+			break;
+		case Error:
+			res_str = "Error";
+			break;
+		default:
+			res_str = "WTF!";
+			break;
+		}
+	}
+
+	X509_NAME_oneline(X509_get_subject_name (server_cert),
+			  cert_str, sizeof (cert_str));
+	X509_free(server_cert);
+
+	if (res == MatchFound) {
+		printf("https server '%s' has this certificate, "
+		       "which looks good to me:\n%s\n",
+		       host, cert_str);
+		return 1;
+	}
+	else {
+		printf("Got '%s' for hostname '%s' and certificate:\n%s\n",
+		       res_str, host, cert_str);
+		return 1;
+	}
+}
+
+
+
+
+static bool verify_ssl_cert (struct ssl_child *qry) {
+
+	/* Attempt to use the system's trusted root certificates.
+	 * (This path is only valid for Debian-based systems.) */
+	 //if (1 != SSL_CTX_load_verify_locations(qry->ssl_ctx, "/etc/ssl/certs/ca-certificates.crt", NULL)) crondlog(LVL7,"SSL_CTX_load_verify_locations"); 
+
+	/* Ask OpenSSL to verify the server certificate.  Note that this
+	 * does NOT include verifying that the hostname is correct.
+	 * So, by itself, this means anyone with any legitimate
+	 * CA-issued certificate for any website, can impersonate any
+	 * other website in the world.  This is not good.  See "The
+	 * Most Dangerous Code in the World" article at
+	 * https://crypto.stanford.edu/~dabo/pubs/abstracts/ssl-client-bugs.html
+	 */
+
+	SSL_CTX_set_verify(qry->ssl_ctx, SSL_VERIFY_PEER, NULL);
+	
+	/* This is how we solve the problem mentioned in the previous
+	 * comment.  We "wrap" OpenSSL's validation routine in our
+	 * own routine, which also validates the hostname by calling
+	 * the code provided by iSECPartners.  Note that even though
+	 * the "Everything You've Always Wanted to Know About
+	 * Certificate Validation With OpenSSL (But Were Afraid to
+	 * Ask)" paper from iSECPartners says very explicitly not to
+	 * call SSL_CTX_set_cert_verify_callback (at the bottom of
+	 * page 2), what we're doing here is safe because our
+	 * cert_verify_callback() calls X509_verify_cert(), which is
+	 * OpenSSL's built-in routine which would have been called if
+	 * we hadn't set the callback.  Therefore, we're just
+	 * "wrapping" OpenSSL's routine, not replacing it. */ 
+
+	SSL_CTX_set_cert_verify_callback (qry->ssl_ctx, cert_verify_callback, (void *) qry->p->host);
+}
+
+
 static bool ssl_child_start (struct ssl_child *qry, const char * cipher_list)
 {
 	/* OpenSSL is initialized, SSL_library_init() should be called already */
@@ -305,7 +413,7 @@ static bool ssl_child_start (struct ssl_child *qry, const char * cipher_list)
 
 	/* Do we want to do any sort of vericiation the probe? */
 	/* if we don't we might be hitting a proxy server in the way */
-	/*  verify_ssl_cert(qry); */
+	// verify_ssl_cert(qry);
 	
 
 	/* this cipher per context . we are setting per connection */
@@ -481,15 +589,36 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 	JS_NC(version, qry->sslv_str);
 
 	if ((qry->ssl_ctx != NULL) && (qry->ssl != NULL) && (qry->ssl_incomplete != 0)) {
+		X509 *x509 = NULL;
 		qry->p->q_success++;
 		AS(","); 
 		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
 
-		if (qry->gc == FALSE) {
+		if ((qry->gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
 			/* this is a successful child. 
 			 * create grand children with algorithm varients 
 			 */
 			ssl_gc_init(qry);
+		}		
+		x509 = SSL_get_peer_certificate(qry->ssl);
+		if (x509 != NULL) {
+			BUF_MEM *bptr;
+			int i;
+		       	int j = 0;
+			BIO *b64 = BIO_new (BIO_s_mem());
+			printf ("check the cert \n");
+			PEM_write_bio_X509(b64, x509);
+			BIO_get_mem_ptr(b64, &bptr); 
+			
+			AS(", cert : [\""); 
+			for (i  = 0; i < bptr->length;  i++) {
+				if (bptr->data[i] == '\n') {
+					AS("\\");
+				}
+				AS(bptr->data[i]);
+			} 
+			AS("\""); 
+			
 		}
 	}
 
@@ -566,74 +695,6 @@ void print_ssl_resp(struct ssl_child *qry) {
 	}
 
 }
-
-
-/* See http://archives.seul.org/libevent/users/Jan-2013/msg00039.html */
-static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
-{
-	char cert_str[256];
-	const char *host = (const char *) arg;
-	const char *res_str = "X509_verify_cert failed";
-	HostnameValidationResult res = Error;
-
-	/* This is the function that OpenSSL would call if we hadn't called
-	 * SSL_CTX_set_cert_verify_callback().  Therefore, we are "wrapping"
-	 * the default functionality, rather than replacing it. */
-	int ok_so_far = 0;
-
-	X509 *server_cert = NULL;
-
-	/* AA  fixme
-	if (qry->opt_ignore_cert) {
-		return 1;
-	}
-	*/
-
-	ok_so_far = X509_verify_cert(x509_ctx);
-
-	server_cert = X509_STORE_CTX_get_current_cert(x509_ctx);
-
-	if (ok_so_far) {
-		res = validate_hostname(host, server_cert);
-
-		switch (res) {
-		case MatchFound:
-			res_str = "MatchFound";
-			break;
-		case MatchNotFound:
-			res_str = "MatchNotFound";
-			break;
-		case NoSANPresent:
-			res_str = "NoSANPresent";
-			break;
-		case MalformedCertificate:
-			res_str = "MalformedCertificate";
-			break;
-		case Error:
-			res_str = "Error";
-			break;
-		default:
-			res_str = "WTF!";
-			break;
-		}
-	}
-
-	X509_NAME_oneline(X509_get_subject_name (server_cert),
-			  cert_str, sizeof (cert_str));
-
-	if (res == MatchFound) {
-		printf("https server '%s' has this certificate, "
-		       "which looks good to me:\n%s\n",
-		       host, cert_str);
-		return 1;
-	}
-	else {
-		printf("Got '%s' for hostname '%s' and certificate:\n%s\n",
-		       res_str, host, cert_str);
-		return 1;
-	}
-}
-
 
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
@@ -763,8 +824,7 @@ static bool ssl_arg_validate (int argc, char *argv[], struct ssl_state *pqry )
 		pqry->opt_tls_v1 =  TLS1_VERSION;
 		pqry->opt_tls_v11 = TLS1_1_VERSION;
 		pqry-> opt_tls_v12 = TLS1_2_VERSION;
-	}
-
+	} 
 	return TRUE;
 }
 
@@ -803,7 +863,7 @@ static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = TRUE;
+	pqry->opt_all_tests = FALSE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
@@ -832,45 +892,8 @@ static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(voi
 	return pqry;
 }
  
-static bool verify_ssl_cert (struct ssl_child *qry) {
-
-	/* Attempt to use the system's trusted root certificates.
-	 * (This path is only valid for Debian-based systems.) */
-	 if (1 != SSL_CTX_load_verify_locations(qry->ssl_ctx, "/etc/ssl/certs/ca-certificates.crt", NULL)) crondlog(LVL7,"SSL_CTX_load_verify_locations"); 
-
-	/* Ask OpenSSL to verify the server certificate.  Note that this
-	 * does NOT include verifying that the hostname is correct.
-	 * So, by itself, this means anyone with any legitimate
-	 * CA-issued certificate for any website, can impersonate any
-	 * other website in the world.  This is not good.  See "The
-	 * Most Dangerous Code in the World" article at
-	 * https://crypto.stanford.edu/~dabo/pubs/abstracts/ssl-client-bugs.html
-	 */
-
-	SSL_CTX_set_verify(qry->ssl_ctx, SSL_VERIFY_PEER, NULL);
-	
-	/* This is how we solve the problem mentioned in the previous
-	 * comment.  We "wrap" OpenSSL's validation routine in our
-	 * own routine, which also validates the hostname by calling
-	 * the code provided by iSECPartners.  Note that even though
-	 * the "Everything You've Always Wanted to Know About
-	 * Certificate Validation With OpenSSL (But Were Afraid to
-	 * Ask)" paper from iSECPartners says very explicitly not to
-	 * call SSL_CTX_set_cert_verify_callback (at the bottom of
-	 * page 2), what we're doing here is safe because our
-	 * cert_verify_callback() calls X509_verify_cert(), which is
-	 * OpenSSL's built-in routine which would have been called if
-	 * we hadn't set the callback.  Therefore, we're just
-	 * "wrapping" OpenSSL's routine, not replacing it. */ 
-
-	SSL_CTX_set_cert_verify_callback (qry->ssl_ctx, cert_verify_callback, (void *) qry->p->host);
-}
-
 static bool ssl_child_init(struct ssl_state *pqry, struct evutil_addrinfo *addr_curr, int sslv) 
 {
-
-	if (sslv <= 0)
-		return TRUE;
 
 	pqry->active++;
 	struct  ssl_child *qry = xzalloc(sizeof(struct ssl_child));
@@ -911,11 +934,15 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 
 	for (cur = res; cur != NULL; cur = cur->ai_next) {
 		pqry->dns_count++;
-
-		ssl_child_init(pqry, cur, pqry->opt_ssl_v3);
-		ssl_child_init(pqry, cur, pqry->opt_tls_v1);
-		ssl_child_init(pqry, cur, pqry->opt_tls_v11);
-		ssl_child_init(pqry, cur,pqry->opt_tls_v12);
+		if (pqry->opt_all_tests) {
+			ssl_child_init(pqry, cur, pqry->opt_ssl_v3);
+			ssl_child_init(pqry, cur, pqry->opt_tls_v1);
+			ssl_child_init(pqry, cur, pqry->opt_tls_v11);
+			ssl_child_init(pqry, cur, pqry->opt_tls_v12); 
+		}
+		else  {
+			ssl_child_init(pqry, cur, 0);
+		}
 	}
 }
 
