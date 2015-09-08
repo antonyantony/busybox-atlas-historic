@@ -189,12 +189,12 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 		buf_cleanup(&qry->err);
 	}
 
-	/* 
-	if (qry->ssl_incomplete &&  qry->bev != NULL){
+	 
+	if (qry->bev != NULL && qry->ssl_incomplete){
 		bufferevent_free(qry->bev);
 		qry->bev = NULL;
 	}
-
+	/*
 	if(qry->ssl != NULL) {
 		SSL_free(qry->ssl);
 		qry->ssl = NULL;
@@ -610,14 +610,17 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 			PEM_write_bio_X509(b64, x509);
 			BIO_get_mem_ptr(b64, &bptr); 
 			
-			AS(", cert : [\""); 
-			for (i  = 0; i < bptr->length;  i++) {
-				if (bptr->data[i] == '\n') {
-					AS("\\");
-				}
-				AS(bptr->data[i]);
-			} 
-			AS("\""); 
+			if (bptr->length < 0) {
+				AS(", cert : [\""); 
+				for (i  = 0; i < bptr->length;  i++) {
+					if (bptr->data[i] == '\n') {
+						AS("\\");
+					}
+					/* this could be more efficient ? */
+					buf_add(qry->result, bptr->data[i], 1);
+				} 
+				AS("\""); 
+			}
 			
 		}
 	}
@@ -744,6 +747,8 @@ static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 	evtimer_del(&qry->timeout_ev);
 	print_ssl_resp(qry);
 	qry->ssl_incomplete = FALSE;
+	bufferevent_free(qry->bev);
+	qry->bev = NULL;
 }
 static void write_cb(struct bufferevent *bev, void *ptr)
 {
@@ -820,10 +825,10 @@ static bool ssl_arg_validate (int argc, char *argv[], struct ssl_state *pqry )
 		pqry->host = strdup(argv[optind]); 
 	}
 	if (pqry->opt_all_tests ) {
-		pqry->opt_ssl_v3 = SSL3_VERSION;
-		pqry->opt_tls_v1 =  TLS1_VERSION;
-		pqry->opt_tls_v11 = TLS1_1_VERSION;
-		pqry-> opt_tls_v12 = TLS1_2_VERSION;
+		// pqry->opt_ssl_v3 = SSL3_VERSION;
+		// pqry->opt_tls_v1 =  TLS1_VERSION;
+		 pqry->opt_tls_v11 = TLS1_1_VERSION;
+		//pqry-> opt_tls_v12 = TLS1_2_VERSION;
 	} 
 	return TRUE;
 }
@@ -863,7 +868,7 @@ static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = FALSE;
+	pqry->opt_all_tests = TRUE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
