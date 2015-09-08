@@ -105,12 +105,6 @@ config EVSSLGETCERT
         help
                 standalone version of event-driven sslgetcert
 
-config EVSSLSCAN
-        bool "evsslscan"
-        default n
-        help
-                ping ssl server with various paramenters and summarize
-
 config EVTDIG
 	bool "evtdig"
 	default n
@@ -126,6 +120,12 @@ config FEATURE_EVTDIG_DEBUG
 	help
  	 extra debug info. Also may cause segfault or/and memory leak.
 	 Add at your own risk.
+
+config EVTLSSCAN
+        bool "evtlsscan"
+        default n
+        help
+                ping ssl server with various paramenters and summarize
 
 config EVTRACEROUTE
 	bool "evtraceroute"

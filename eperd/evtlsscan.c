@@ -1033,8 +1033,8 @@ void sslscan_start (struct ssl_state *pqry)
 			dns_cb, pqry);
 } 
 
-int evsslscan_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
-int evsslscan_main(int argc, char **argv)
+int evtlsscan_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
+int evtlsscan_main(int argc, char **argv)
 {
 	struct ssl_state *qry = NULL;
 

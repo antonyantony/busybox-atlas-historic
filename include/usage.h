@@ -6312,9 +6312,9 @@
 #define evsslgetcert_full_usage "\n\n" \
      "todo"
 
-#define evsslscan_trivial_usage \
+#define evtlsscan_trivial_usage \
        "todo"
-#define evsslscan_full_usage "\n\n" \
+#define evtlsscan_full_usage "\n\n" \
      "todo"
 
 
