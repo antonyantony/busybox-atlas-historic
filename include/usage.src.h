@@ -93,6 +93,12 @@ INSERT
 #define evsslgetcert_full_usage "\n\n" \
      "todo"
 
+#define evtlsscan_trivial_usage \
+       "todo"
+#define evtlsscan_full_usage "\n\n" \
+     "todo"
+
+
 #define evtraceroute_trivial_usage \
 	"-[46FIrTU] [-a <paris mod>] [-c <count>] [-f <hop>]" \
 "\n     [-g <gap>] [-m <hop>] [-p <port>] [-w <ms>] [-z <ms>] [-A <string>]" \

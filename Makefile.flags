@@ -159,6 +159,10 @@ LDLIBS += dmalloc
 endif 
 
 LDLIBS += event
+LDLIBS += crypto
+LDLIBS += ssl
+LDLIBS += event_openssl
+LDLIBS += pthread
 LDFLAGS += -Llibevent/.libs -Wl,-rpath,/usr/local/atlas/lib -Wl,-rpath,libevent/.libs
 
 

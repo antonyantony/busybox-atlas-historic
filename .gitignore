@@ -45,6 +45,8 @@ core
 #
 /busybox.links
 /runtest-tempdir-links
+_install/
+libevent/lib/
 /testsuite/echo-ne
 
 #
