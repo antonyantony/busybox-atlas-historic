@@ -48,3 +48,11 @@ core
 _install/
 libevent/lib/
 /testsuite/echo-ne
+
+#
+# cscope output
+#
+cscope.files
+cscope.in.out
+cscope.out
+cscope.po.out

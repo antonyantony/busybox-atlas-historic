@@ -11,7 +11,9 @@
 #include <string.h>
 #include <net/route.h>
 #include <net/if.h>
+#include <platform.h>
 #include <inet_common.h>
+#include "atlas_probe.h"
 #include "../eperd/eperd.h"
 #include "../eperd/readresolv.h"
 
@@ -65,6 +67,13 @@ static void report_err(const char *fmt, ...);
 
 int rptaddrs_main(int argc, char *argv[]);
 
+
+int rptaddrs_main(int argc UNUSED_PARAM, char *argv[]) 
+{
+	/* broken with upstream merge need fix */
+}
+#ifdef AA_FIX_ME
+/* rptaddrs_main is brokken with latest busybox need more work */
 int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
 {
 	int r, need_report;
@@ -790,3 +799,4 @@ static void report_err(const char *fmt, ...)
 
 	va_end(ap);
 }
+#endif

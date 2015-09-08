@@ -12,7 +12,7 @@ The BusyBox build process is similar to the Linux kernel build:
   make                # This creates the "busybox" executable
   make install        # or make CONFIG_PREFIX=/path/from/root install
   mkdir -p /var/lib/eperd/crons/7  /var/lib/eperd/out  /var/lib/eperd/new
- cp examples/cron.root.7  /var/lib/eprd/crons/7/root
+ cp examples/cron.root.7  /var/lib/eperd/crons/7/root
   ./_install/usr/sbin/eperd -f -c /var/lib/eprd/crons/7/ -O /var/lib/eprd/new/7
 
 The full list of configuration and install options is available by typing:

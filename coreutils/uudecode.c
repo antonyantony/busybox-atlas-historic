@@ -46,7 +46,7 @@ static void FAST_FUNC read_stduu(FILE *src_stream, FILE *dst_stream, int flags U
 
 		encoded_len = line[0] * 4 / 3;
 		/* Check that line is not too short. (we tolerate
-		 * overly _long_ line to accomodate possible extra '`').
+		 * overly _long_ line to accommodate possible extra '`').
 		 * Empty line case is also caught here. */
 		if (str_len <= encoded_len) {
 			break; /* go to bb_error_msg_and_die("short file"); */
@@ -110,10 +110,10 @@ int uudecode_main(int argc UNUSED_PARAM, char **argv)
 		FILE *dst_stream;
 		int mode;
 
-		if (strncmp(line, "begin-base64 ", 13) == 0) {
+		if (is_prefixed_with(line, "begin-base64 ")) {
 			line_ptr = line + 13;
 			decode_fn_ptr = read_base64;
-		} else if (strncmp(line, "begin ", 6) == 0) {
+		} else if (is_prefixed_with(line, "begin ")) {
 			line_ptr = line + 6;
 			decode_fn_ptr = read_stduu;
 		} else {
