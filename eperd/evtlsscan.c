@@ -54,7 +54,7 @@ struct tls_base {
 	struct event_base *event_base;
 };
 
-static void crondlog_aa(const char *ctl, char *fmt, ...);
+static void crondlog_aa(const char *ctl, ...);
 
 /* How to keep track of each user tlsscan query */
 struct tls_state {
@@ -870,7 +870,7 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = FALSE;
+	pqry->opt_all_tests = TRUE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
@@ -1069,11 +1069,17 @@ int evtlsscan_main(int argc, char **argv)
 	return 0;
 }
 
-static void crondlog_aa(const char *ctl, char *fmt, ...)
+void crondlog_aa(const char *ctl, ...)
 {
 	va_list va;
-	char buff[1000];
-	va_start(va, fmt);
-	vsnprintf(buff, 1000 - 1, fmt, va);
-	printf("%s\n", buff);
+	int level = (ctl[0] & 0x1f);
+
+	va_start(va, ctl);
+	if (level >= (int)LogLevel) {
+// TODO: ERR -> error, WARN -> warning, LVL -> info
+		bb_verror_msg(ctl + 1, va, /* strerr: */ NULL);
+	}
+	va_end(va);
+	if (ctl[0] & 0x80)
+		exit(20);
 }
