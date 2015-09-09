@@ -4736,6 +4736,7 @@ static struct pipe *parse_stream(char **pstring,
 	}
 }
 
+#if ENABLE_FEATURE_IPV6 && ENABLE_FEATURE_RPTADDRS
 int builitin_rptaddrs(int argc, char *argv[]);
 
 static int builtin_rptaddrs(char **argv) 
@@ -4746,7 +4747,7 @@ static int builtin_rptaddrs(char **argv)
 		;
 	return rptaddrs_main(argc, argv);
 }
-
+#endif
 
 /*** Execution routines ***/
 
