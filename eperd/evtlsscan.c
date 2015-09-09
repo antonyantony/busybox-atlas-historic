@@ -50,14 +50,14 @@ enum writestate { WRITE_FIRST, WRITE_HEADER, WRITE_POST_HEADER,
 
 
 /* struct common for all quries */
-struct ssl_base {
+struct tls_base {
 	struct event_base *event_base;
 };
 
 static void crondlog_aa(const char *ctl, char *fmt, ...);
 
-/* How to keep track of each user sslscan query */
-struct ssl_state {
+/* How to keep track of each user tlsscan query */
+struct tls_state {
 	char *host;
 	char *str_Atlas;
 	char *out_filename;
@@ -71,6 +71,7 @@ struct ssl_state {
 
 	struct evutil_addrinfo *addr;
 	struct timeval start_time;
+	struct event free_inst_ev;
 
 	char *port;
 	char do_get;
@@ -100,18 +101,18 @@ struct ssl_state {
 	int opt_tls_v11;
 	int opt_tls_v12;
 
-	struct ssl_child *c;
+	struct tls_child *c;
 	struct evutil_addrinfo hints;
 	struct event done_ev;
 	void (*done)(void *state);
 };
 
-struct ssl_child {
+struct tls_child {
 	/* per instance variables. Unshared after duplicate */
-	struct ssl_child *next;
+	struct tls_child *next;
 	int serial;  /* serial number of each additional query. First is zero */
 
-	struct ssl_state *p; /* parent object */
+	struct tls_state *p; /* parent object */
 	struct buf *result; /* all children share same result structure as parent */
 
 	struct buf err;
@@ -131,9 +132,8 @@ struct ssl_child {
 
 	struct event timeout_ev;
 	struct event free_child_ev;
-	struct event free_pqry_ev;
 	bool gc;
-	bool ssl_incomplete;
+	bool tls_incomplete;
 	enum readstate readstate;
 	enum writestate writestate;
 	struct sockaddr_in6 loc_sin6;
@@ -149,20 +149,20 @@ static struct option longopts[]=
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
 static void write_cb(struct bufferevent *bev, void *ptr);
-void print_ssl_resp(struct ssl_child *qry);
+void print_tls_resp(struct tls_child *qry);
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr);
 
-static struct ssl_base *ssl_base = NULL; 
+static struct tls_base *tls_base = NULL; 
 
 
 static void done_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h) {
-	struct ssl_state *pqry = h;
+	struct tls_state *pqry = h;
 	pqry->done(pqry);
 }
 
-static void free_qry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
+static void free_pqry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
 {
-	struct ssl_state *pqry = h;
+	struct tls_state *pqry = h;
 	if(pqry->err.size)
 	{
 		buf_cleanup(&pqry->err);
@@ -182,7 +182,7 @@ static void free_qry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSED
 static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
 {
 
-	struct ssl_child *qry = h;
+	struct tls_child *qry = h;
 	/* only free ephemeral data for the qury */ 
 	if(qry->err.size)
 	{
@@ -190,7 +190,7 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 	}
 
 	 
-	if (qry->bev != NULL && qry->ssl_incomplete){
+	if (qry->bev != NULL && qry->tls_incomplete){
 		bufferevent_free(qry->bev);
 		qry->bev = NULL;
 	}
@@ -208,9 +208,12 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 	evtimer_del(&qry->timeout_ev);
 }
 
-int sslscan_delete (void *st) 
+int tlsscan_delete (void *st) 
 {
-	struct ssl_state *pqry = st;
+	struct tls_state *pqry = st; 
+	if (pqry == NULL)
+		return 0;
+
 	if (pqry->state )
 		return 0;
 
@@ -219,19 +222,19 @@ int sslscan_delete (void *st)
 		pqry->result = NULL;
 	}
 
-	if(pqry->out_filename)
+	if (pqry->out_filename != NULL)
 	{
 		free(pqry->out_filename);
 		pqry->out_filename = NULL ;
 	}
 
-	if( pqry->str_Atlas)
+	if( pqry->str_Atlas != NULL)
 	{
 		free(pqry->str_Atlas);
 		pqry->str_Atlas = NULL;
 	}
 
-	if( pqry->host)
+	if (pqry->host != NULL)
 	{
 		free(pqry->host);
 		pqry->host = NULL;
@@ -243,7 +246,7 @@ int sslscan_delete (void *st)
 static void timeout_cb(int unused  UNUSED_PARAM, const short event
 		UNUSED_PARAM, void *h)
 {
-	struct ssl_child *qry = (struct ssl_child *)h;
+	struct tls_child *qry = (struct tls_child *)h;
 	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
 			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 
@@ -339,7 +342,7 @@ static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
 
 
 
-static bool verify_ssl_cert (struct ssl_child *qry) {
+static bool verify_ssl_cert (struct tls_child *qry) {
 
 	/* Attempt to use the system's trusted root certificates.
 	 * (This path is only valid for Debian-based systems.) */
@@ -374,7 +377,7 @@ static bool verify_ssl_cert (struct ssl_child *qry) {
 }
 
 
-static bool ssl_child_start (struct ssl_child *qry, const char * cipher_list)
+static bool tls_child_start (struct tls_child *qry, const char * cipher_list)
 {
 	/* OpenSSL is initialized, SSL_library_init() should be called already */
 
@@ -481,7 +484,7 @@ static bool ssl_child_start (struct ssl_child *qry, const char * cipher_list)
 }
 
 
-static void ssl_gc_init(struct ssl_child *qry)
+static void ssl_gc_init(struct tls_child *qry)
 {
 	int i;
 	const char *p;
@@ -499,10 +502,10 @@ static void ssl_gc_init(struct ssl_child *qry)
 			continue;
 
 		qry->p->active++;
-		struct  ssl_child *gcqry = xzalloc(sizeof(struct ssl_child));
+		struct  tls_child *gcqry = xzalloc(sizeof(struct tls_child));
 		gcqry->next = qry->p->c;
 		qry->p->c = gcqry;
-		qry->ssl_incomplete = TRUE;
+		qry->tls_incomplete = TRUE;
 
 		gcqry->p = qry->p;
 
@@ -516,12 +519,12 @@ static void ssl_gc_init(struct ssl_child *qry)
 		gcqry->sslv  = qry->sslv;
 		crondlog_aa(LVL7, "grand child %s %s %s active = %d %s %s",  __func__,
 				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, p);
-		ssl_child_start(gcqry, p);
+		tls_child_start(gcqry, p);
 		gcqry->gc = TRUE;
 	}
 }	
 
-void fmt_ssl_resp(struct ssl_child *qry) {
+void fmt_ssl_resp(struct tls_child *qry) {
 	char addrstr[INET6_ADDRSTRLEN];
         char dst_addr_str[(INET6_ADDRSTRLEN+1)];
 	void *ptr = NULL;
@@ -535,7 +538,7 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 
 
 	/* if it is failed grand child qury do not print anything */
-	if (qry->gc && qry->ssl_incomplete ){
+	if (qry->gc && qry->tls_incomplete ){
 		if(qry->err.size)
 		{
 			buf_cleanup(&qry->err);
@@ -550,7 +553,7 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 			JS(id, qry->p->str_Atlas);
 		}
 		JD(fw, fw);
-		JD(dnscout, qry->p->dns_count);
+		JD(dnscount, qry->p->dns_count);
 		JS1(time, %ld, qry->p->start_time.tv_sec);
 		JD(lts,lts); // fix me take lts when I create start time.
 		AS("\"resultset\" : [ {");
@@ -588,7 +591,7 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 	JS(ciphers, qry->cipher_list);
 	JS_NC(version, qry->sslv_str);
 
-	if ((qry->ssl_ctx != NULL) && (qry->ssl != NULL) && (qry->ssl_incomplete != 0)) {
+	if ((qry->ssl_ctx != NULL) && (qry->ssl != NULL) && (qry->tls_incomplete != 0)) {
 		X509 *x509 = NULL;
 		qry->p->q_success++;
 		AS(","); 
@@ -635,12 +638,12 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 	AS (" }"); //result 
 }
 
-void print_ssl_resp(struct ssl_child *qry) {
+void print_ssl_resp(struct tls_child *qry) {
 
 	bool write_out = FALSE;
 	struct timeval asap = { 0, 10 };
 	FILE *fh;
-	struct ssl_state *pqry = qry->p;
+	struct tls_state *pqry = qry->p;
 
 	fmt_ssl_resp(qry);
 	evtimer_add(&qry->free_child_ev, &asap);
@@ -686,11 +689,10 @@ void print_ssl_resp(struct ssl_child *qry) {
 		if (qry->p->out_filename)
 			fclose(fh);
 
-
 		qry->p->state = STATUS_FREE;
 		qry->retry = 0;
 		asap.tv_usec *= 2;
-		evtimer_add(&qry->free_pqry_ev, &asap);
+		evtimer_add(&qry->p->free_inst_ev, &asap);
 	} 
 	else {
 		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
@@ -702,7 +704,7 @@ void print_ssl_resp(struct ssl_child *qry) {
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 {
-	struct ssl_child *qry = ptr;
+	struct tls_child *qry = ptr;
 	struct timeval rectime ;
 	if (events & BEV_EVENT_ERROR)
 	{
@@ -740,13 +742,13 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 {
-	struct ssl_child  *qry = ptr;
+	struct tls_child  *qry = ptr;
 
 	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
 			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	evtimer_del(&qry->timeout_ev);
 	print_ssl_resp(qry);
-	qry->ssl_incomplete = FALSE;
+	qry->tls_incomplete = FALSE;
 	bufferevent_free(qry->bev);
 	qry->bev = NULL;
 }
@@ -757,7 +759,7 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 	off_t cLength;
 	struct stat sb;
 	struct timeval endtime;
-	struct ssl_child *qry = ptr;
+	struct tls_child *qry = ptr;
 
 	// printf("%s: start:\n", __func__);
 	
@@ -802,46 +804,46 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 static void local_exit(void *state UNUSED_PARAM)
 {
 
-	struct timeval asap = { 0, 0 };
+	struct timeval asap = { 0, 2 };
 	fprintf(stderr, "And we are done\n");
 	event_base_loopexit (EventBase,  &asap);
 	return;
 }
 
-/* called only once. Initialize ssl_base variables here */
-static void ssl_base_new(struct event_base *event_base)
+/* called only once. Initialize tls_base variables here */
+static void tls_base_new(struct event_base *event_base)
 {
-	ssl_base = xzalloc(sizeof( struct ssl_base));
+	tls_base = xzalloc(sizeof( struct tls_base));
 }
 
-static bool ssl_arg_validate (int argc, char *argv[], struct ssl_state *pqry )
+static bool tls_arg_validate (int argc, char *argv[], struct tls_state *pqry )
 {
 	if (optind != argc-1)  {
 		crondlog(LVL9 "ERROR no server IP address in input");
-		sslscan_delete(pqry);
-		return FALSE;
+		tlsscan_delete(pqry);
+		return TRUE;
 	}
 	else {
 		pqry->host = strdup(argv[optind]); 
 	}
 	if (pqry->opt_all_tests ) {
-		// pqry->opt_ssl_v3 = SSL3_VERSION;
-		// pqry->opt_tls_v1 =  TLS1_VERSION;
-		 pqry->opt_tls_v11 = TLS1_1_VERSION;
-		//pqry-> opt_tls_v12 = TLS1_2_VERSION;
+		pqry->opt_ssl_v3 = SSL3_VERSION;
+		pqry->opt_tls_v1 =  TLS1_VERSION;
+		pqry->opt_tls_v11 = TLS1_1_VERSION;
+		pqry-> opt_tls_v12 = TLS1_2_VERSION;
 	} 
-	return TRUE;
+	return FALSE;
 }
 
 /* eperd call this to initialize */
-static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(void *state))
+static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(void *state))
 {
 	int c;
-	struct ssl_state *pqry = NULL;
+	struct tls_state *pqry = NULL;
 	LogFile = "/dev/tty";
 
-	if (ssl_base == NULL) {
-		ssl_base_new(EventBase);
+	if (tls_base == NULL) {
+		tls_base_new(EventBase);
 		RAND_poll();
 		SSL_library_init(); /* call only once this is not reentrant. */
 		ERR_load_crypto_strings();
@@ -849,13 +851,13 @@ static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(voi
 		OpenSSL_add_all_algorithms();
 	}
 
-	if (ssl_base == NULL) {
-		crondlog(LVL8 "ssl_base_new failed");
+	if (tls_base == NULL) {
+		crondlog(LVL8 "tls_base_new failed");
 		return NULL;
 	}
 
 	/* initialize a query object */
-	pqry = xzalloc(sizeof(struct ssl_state));
+	pqry = xzalloc(sizeof(struct tls_state));
 	pqry->opt_retry_max = 0;
 	pqry->port = "443";
 	pqry->opt_ignore_cert = 0;
@@ -868,7 +870,7 @@ static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = TRUE;
+	pqry->opt_all_tests = FALSE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
@@ -883,25 +885,23 @@ static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(voi
 			case '6':
 				pqry->opt_v6 = 1;
 				break;
-
 		}
 	}
 
-	if (!ssl_arg_validate(argc, argv, pqry))
+	if (tls_arg_validate(argc, argv, pqry))
 	{
-		crondlog(LVL8 "ssl_arg_validate failed");
+		crondlog(LVL8 "tls_arg_validate failed");
 		return NULL; 
 	} 
-
 
 	return pqry;
 }
  
-static bool ssl_child_init(struct ssl_state *pqry, struct evutil_addrinfo *addr_curr, int sslv) 
+static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_curr, int sslv) 
 {
 
 	pqry->active++;
-	struct  ssl_child *qry = xzalloc(sizeof(struct ssl_child));
+	struct  tls_child *qry = xzalloc(sizeof(struct tls_child));
 	qry->next = pqry->c;
 	pqry->c = qry;
 	qry->addr_curr = addr_curr;
@@ -911,16 +911,14 @@ static bool ssl_child_init(struct ssl_state *pqry, struct evutil_addrinfo *addr_
 	qry->result = pqry->result;
 	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
-	evtimer_assign(&qry->free_pqry_ev, EventBase, free_qry_inst_cb, qry);
 	qry->sslv  = sslv;
-	qry->ssl_incomplete = TRUE;
-	ssl_child_start(qry, "ALL:COMPLEMENTOFALL");
-
+	qry->tls_incomplete = TRUE;
+	tls_child_start(qry, "ALL:COMPLEMENTOFALL");
 }
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 {
-	struct ssl_state *pqry = (struct ssl_state *) ctx;
+	struct tls_state *pqry = (struct tls_state *) ctx;
 	struct bufferevent *bev;
 	struct evutil_addrinfo *cur;
 
@@ -940,20 +938,20 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 	for (cur = res; cur != NULL; cur = cur->ai_next) {
 		pqry->dns_count++;
 		if (pqry->opt_all_tests) {
-			ssl_child_init(pqry, cur, pqry->opt_ssl_v3);
-			ssl_child_init(pqry, cur, pqry->opt_tls_v1);
-			ssl_child_init(pqry, cur, pqry->opt_tls_v11);
-			ssl_child_init(pqry, cur, pqry->opt_tls_v12); 
+			tls_child_init(pqry, cur, pqry->opt_ssl_v3);
+			tls_child_init(pqry, cur, pqry->opt_tls_v1);
+			tls_child_init(pqry, cur, pqry->opt_tls_v11);
+			tls_child_init(pqry, cur, pqry->opt_tls_v12); 
 		}
 		else  {
-			ssl_child_init(pqry, cur, 0);
+			tls_child_init(pqry, cur, 0);
 		}
 	}
 }
 
 /* entry point for eperd */
  
-static void printErrorQuick (struct ssl_state *pqry) 
+static void printErrorQuick (struct tls_state *pqry) 
 {
 	FILE *fh;
 
@@ -1001,7 +999,7 @@ static void printErrorQuick (struct ssl_state *pqry)
 		fclose(fh);
 }
 
-void sslscan_start (struct ssl_state *pqry)
+void tlsscan_start (struct tls_state *pqry)
 {
 	switch(pqry->state) 
 	{
@@ -1012,7 +1010,6 @@ void sslscan_start (struct ssl_state *pqry)
 			printErrorQuick(pqry);
 			/* this query is still active. can't start another one */
 			return;
-
 	}
 
 	gettimeofday(&pqry->start_time, NULL);
@@ -1031,17 +1028,19 @@ void sslscan_start (struct ssl_state *pqry)
 
 	(void) evdns_getaddrinfo(DnsBase, pqry->host, "443", &pqry->hints,
 			dns_cb, pqry);
+	evtimer_assign(&pqry->free_inst_ev, EventBase, free_pqry_inst_cb, pqry);
 } 
 
 int evtlsscan_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int evtlsscan_main(int argc, char **argv)
 {
-	struct ssl_state *qry = NULL;
+	struct tls_state *pqry = NULL; /* instance per host(user input) */
 
 	EventBase = event_base_new();
 	if (!EventBase)
 	{
 		crondlog(LVL9 "ERROR: critical event_base_new failed"); /* exits */
+		return 1;
 	}
 
 	DnsBase = evdns_base_new(EventBase, 1);
@@ -1051,15 +1050,15 @@ int evtlsscan_main(int argc, char **argv)
 		return 1;
 	}
 
-	qry = sslscan_init(argc, argv, local_exit);
+	pqry = tlsscan_init(argc, argv, local_exit);
 
-	if(qry == NULL) {
-		crondlog(DIE9 "ERROR: critical sslscan_init failed"); /* exits */
+	if(pqry == NULL) {
+		crondlog(DIE9 "ERROR: critical tlsscan_init failed"); /* exits */
 		event_base_free (EventBase);
 		return 1;
 	}
 
-	sslscan_start(qry);
+	tlsscan_start(pqry);
 
 	event_base_dispatch(EventBase);
 	event_base_loopbreak (EventBase);

@@ -65,13 +65,8 @@ static int rpt_ipv6(char *cache_name, char *out_name, char *opt_atlas, int opt_a
 static void report(const char *fmt, ...);
 static void report_err(const char *fmt, ...); 
 
-int rptaddrs_main(int argc, char *argv[]);
+int rptaddrs_main(int argc UNUSED_PARAM, char *argv[]);
 
-/* rptaddrs_main is brokken with latest busybox need more work */
-int rptaddrs_main(int argc UNUSED_PARAM, char *argv[]) {
-}
-
-#ifdef AA_FIXME
 int rptaddrs_main(int argc UNUSED_PARAM, char *argv[])
 {
 	int r, need_report;
@@ -797,4 +792,3 @@ static void report_err(const char *fmt, ...)
 
 	va_end(ap);
 }
-#endif
