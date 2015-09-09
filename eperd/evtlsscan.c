@@ -268,9 +268,6 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 	int fw = get_atlas_fw_version();
 	int lts =  -1 ; /*  get_timesync(); */
 
-	qry->p->active--;
-	qry->p->q_done++;
-
 
 	/* if it is failed grand child qury do not print anything */
 	if (qry->gc && qry->tls_incomplete ){
@@ -283,7 +280,7 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 
 	if (qry->result->size == 0){
 		AS("RESULT { ");
-		if(qry->p->str_Atlas)
+		if(qry->p->str_Atlas != NULL)
 		{
 			JS(id, qry->p->str_Atlas);
 		}
@@ -380,7 +377,11 @@ static void print_ssl_resp(struct tls_child *qry) {
 	FILE *fh;
 	struct tls_state *pqry = qry->p;
 
+	qry->p->active--;
+	qry->p->q_done++;
+
 	fmt_ssl_resp(qry);
+
 	evtimer_add(&qry->free_child_ev, &asap);
 
 	if (qry->p->active < 1) {
@@ -396,7 +397,7 @@ static void print_ssl_resp(struct tls_child *qry) {
 			evtimer_add(&qry->p->done_ev, &asap);
 	}
 
-	if(write_out && qry->result->size) {
+	if (write_out && (qry->result->size > 0)) {
 		/* end of result only JSON closing brackets from here on */
 		AS("]");  /* resultset : [{}..] */
 
@@ -948,8 +949,6 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 	}
 }
 
-/* entry point for eperd */
- 
 static void printErrorQuick (struct tls_state *pqry) 
 {
 	FILE *fh;
