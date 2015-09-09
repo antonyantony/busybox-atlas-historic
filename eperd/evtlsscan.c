@@ -54,7 +54,7 @@ struct tls_base {
 	struct event_base *event_base;
 };
 
-static void crondlog_aa(const char *ctl, ...);
+static void crondlog_aa(const char *ctl, char *fmt, ...);
 
 /* How to keep track of each user tlsscan query */
 struct tls_state {
@@ -147,15 +147,18 @@ static struct option longopts[]=
 	{ "retry",  required_argument, NULL, O_RETRY },
 };
 
+int tlsscan_delete (void *st);
+void tlsscan_start (struct tls_state *pqry);
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
 static void write_cb(struct bufferevent *bev, void *ptr);
 void print_tls_resp(struct tls_child *qry);
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr);
 static void timeout_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
-static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
+
 static bool tls_child_start (struct tls_child *qry, const char * cipher_list);
 
 static struct tls_base *tls_base = NULL; 
+
 
 static void done_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h) {
 	struct tls_state *pqry = h;
@@ -181,46 +184,6 @@ static void free_pqry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSE
 	}
 }
 
-static void ssl_gc_init(struct tls_child *qry)
-{
-	int i;
-	const char *p;
-	SSL *ssl = SSL_new(qry->ssl_ctx);
-
-	for (i=0; ; i++)
-	{
-		p=SSL_get_cipher_list(ssl,i);
-
-		if (p == NULL) {
-			printf ("%d got null" , i);
-			break;
-		}
-		if (strlen(p) && strncmp(p, qry->cipher_list, strlen(p)) == 0)
-			continue;
-
-		qry->p->active++;
-		struct  tls_child *gcqry = xzalloc(sizeof(struct tls_child));
-		gcqry->next = qry->p->c;
-		qry->p->c = gcqry;
-		qry->tls_incomplete = TRUE;
-
-		gcqry->p = qry->p;
-
-		qry->p->q_serial++;
-		qry->serial =  qry->p->q_serial;
-		
-		gcqry->addr_curr = qry->addr_curr;
-		gcqry->result = qry->result;
-		evtimer_assign(&gcqry->timeout_ev, EventBase, timeout_cb, gcqry);
-		evtimer_assign(&gcqry->free_child_ev, EventBase, free_child_cb, gcqry);
-		gcqry->sslv  = qry->sslv;
-		crondlog_aa(LVL7, "grand child %s %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, p);
-		tls_child_start(gcqry, p);
-		gcqry->gc = TRUE;
-	}
-}	
-
 static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
 {
 
@@ -236,19 +199,67 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 		bufferevent_free(qry->bev);
 		qry->bev = NULL;
 	}
-	/*
+
+	/* 
 	if(qry->ssl != NULL) {
 		SSL_free(qry->ssl);
 		qry->ssl = NULL;
 	}
-
+	*/
 	if(qry->ssl_ctx !=  NULL) {
 		SSL_CTX_free(qry->ssl_ctx);
 		qry->ssl_ctx = NULL;
 	}
-	*/
 	evtimer_del(&qry->timeout_ev);
 }
+static void ssl_gc_init(struct tls_child *qry)
+{
+	int i;
+	const char *p;
+	SSL *ssl = SSL_new(qry->ssl_ctx); /* this is a local one */
+
+	if (ssl == NULL)
+		return;
+
+	for (i=0; ; i++)
+	{
+		struct tls_child *gcqry = NULL; /* next query grand child */
+
+		p = SSL_get_cipher_list(ssl,i);
+		if (p == NULL) {
+			printf ("%d got null" , i);
+			break;
+		}
+		/* skip the one that server picked. We know that is supported */
+		if (strlen(p) && strncmp(p, qry->cipher_list, strlen(p)) == 0)
+			continue;
+
+		qry->p->active++;
+		gcqry = xzalloc(sizeof(struct tls_child));
+
+		if (gcqry == NULL)
+			break;
+
+		gcqry->next = qry->p->c;
+		qry->p->c = gcqry;
+		qry->tls_incomplete = TRUE;
+		gcqry->p = qry->p;
+		qry->p->q_serial++;
+		qry->serial =  qry->p->q_serial;
+		
+		gcqry->addr_curr = qry->addr_curr;
+		gcqry->result = qry->result;
+		evtimer_assign(&gcqry->timeout_ev, EventBase, timeout_cb, gcqry);
+		evtimer_assign(&gcqry->free_child_ev, EventBase, free_child_cb, gcqry);
+		gcqry->sslv  = qry->sslv;
+		crondlog_aa(LVL7, "grand child %s %s %s active = %d %s %s",  __func__,
+				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, p);
+		tls_child_start(gcqry, p);
+		gcqry->gc = TRUE;
+	}
+	SSL_free(ssl);
+}
+
 
 static void fmt_ssl_resp(struct tls_child *qry) {
 	char addrstr[INET6_ADDRSTRLEN];
@@ -339,7 +350,7 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 			PEM_write_bio_X509(b64, x509);
 			BIO_get_mem_ptr(b64, &bptr); 
 			
-			if (bptr->length < 0) {
+			if (bptr->length <  0) { /* AA disabled TBD */
 				AS(", cert : [\""); 
 				for (i  = 0; i < bptr->length;  i++) {
 					if (bptr->data[i] == '\n') {
@@ -350,7 +361,6 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 				} 
 				AS("\""); 
 			}
-			
 		}
 	}
 
@@ -363,7 +373,6 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 
 	AS (" }"); //result 
 }
-
 
 
 static void print_ssl_resp(struct tls_child *qry) {
@@ -429,18 +438,15 @@ static void print_ssl_resp(struct tls_child *qry) {
 
 }
 
+
 int tlsscan_delete (void *st) 
 {
-	struct tls_state *pqry = st; /* eperd call with void pointer */
-
+	struct tls_state *pqry = st; 
 	if (pqry == NULL)
 		return 0;
 
-	if (pqry->state != STATUS_FREE)
-	{
-		/*  can't delete this query yet. eperd will call us again */
+	if (pqry->state )
 		return 0;
-	}
 
 	if (pqry->result != NULL) {
 		free(pqry->result);
@@ -466,6 +472,19 @@ int tlsscan_delete (void *st)
 	}
 
 	return 1;
+}
+
+static void timeout_cb(int unused  UNUSED_PARAM, const short event
+		UNUSED_PARAM, void *h)
+{
+	struct tls_child *qry = (struct tls_child *)h;
+	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
+			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
+
+	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
+	buf_add(&qry->err, line, strlen(line));
+
+	print_ssl_resp(qry);
 }
 
 /* Initialize a struct timeval by converting milliseconds */
@@ -631,13 +650,13 @@ static bool tls_child_start (struct tls_child *qry, const char * cipher_list)
 	// SSL_CTX_set_cipher_list(qry->ssl_ctx, "HIGH");
 
 	if (!qry->ssl_ctx) {
-		crondlog_aa(LVL9, "SSL_CTX_new");
+		crondlog_aa(LVL9, "SSL_CTX_new %s", __func__);
 		return TRUE;
 	}
 
 	qry->ssl = SSL_new(qry->ssl_ctx);
 	if (qry->ssl == NULL) {
-		crondlog_aa(LVL9, "SSL_new()");
+		crondlog_aa(LVL9, "SSL_new() %s", __func__);
 		return TRUE;
 	}
 	SSL_set_cipher_list(qry->ssl, cipher_list);
@@ -689,6 +708,9 @@ static bool tls_child_start (struct tls_child *qry, const char * cipher_list)
 	}
 	return FALSE;
 }
+
+
+	
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 {
@@ -858,7 +880,7 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = TRUE;
+	pqry->opt_all_tests = FALSE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
@@ -1057,36 +1079,13 @@ int evtlsscan_main(int argc, char **argv)
 	return 0;
 }
 
-void crondlog_aa(const char *ctl, ...)
+static void crondlog_aa(const char *ctl, char *fmt, ...)
 {
 	va_list va;
+	char buff[1000];
 	int level = (ctl[0] & 0x1f);
 
-	va_start(va, ctl);
-	if (level >= (int)LogLevel) {
-// TODO: ERR -> error, WARN -> warning, LVL -> info
-		bb_verror_msg(ctl + 1, va, /* strerr: */ NULL);
-	}
-	va_end(va);
-	if (ctl[0] & 0x80)
-		exit(20);
-}
-
-static void timeout_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
-{
-	struct tls_child *qry = (struct tls_child *)h;
-	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
-			qry->p->host, qry->addrstr,
-			qry->p->active, qry->sslv_str, qry->cipher_list);
-
-	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "",
-			DEFAULT_NOREPLY_TIMEOUT);
-	buf_add(&qry->err, line, strlen(line));
-
-	if(qry->ssl != NULL) {
-		SSL_free(qry->ssl);
-		qry->ssl = NULL;
-	}
-
-	print_ssl_resp(qry);
+	va_start(va, fmt);
+	vsnprintf(buff, 1000 - 1, fmt, va);
+	printf("%s\n", buff);
 }
