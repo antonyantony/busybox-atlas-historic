@@ -56,18 +56,19 @@ struct tls_base {
 
 static void crondlog_aa(const char *ctl, char *fmt, ...);
 
-/* How to keep track of each user tlsscan query */
+/* How to keep track of each user tlsscan query aka pqry */
 struct tls_state {
 	char *host;
 	char *str_Atlas;
 	char *out_filename;
-	int state; 
+	int state;
 	int q_serial;  /* on parent it is the total queries sent */
 	int q_done;
 	int q_success;
 
+	/* all children share same result and err structure as parent */
 	struct buf err;
-	struct buf *result; /* all children share same result structure as parent */
+	struct buf *result;
 
 	struct evutil_addrinfo *addr;
 	struct timeval start_time;
@@ -94,7 +95,7 @@ struct tls_state {
 	int opt_max_con; /* maximum concurrent queries per destination */
 	int opt_max_bytes; /*  max size of output buffer */
 
-	bool opt_all_tests; 
+	bool opt_all_tests;
 
 	int opt_ssl_v3;
 	int opt_tls_v1;
@@ -184,7 +185,7 @@ static void free_pqry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSE
 	}
 }
 
-static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
+static void free_child_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
 {
 
 	struct tls_child *qry = h;
@@ -194,7 +195,7 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 		buf_cleanup(&qry->err);
 	}
 
-	 
+
 	if (qry->bev != NULL && qry->tls_incomplete){
 		bufferevent_free(qry->bev);
 		qry->bev = NULL;
@@ -206,6 +207,7 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 		qry->ssl = NULL;
 	}
 	*/
+
 	if(qry->ssl_ctx !=  NULL) {
 		SSL_CTX_free(qry->ssl_ctx);
 		qry->ssl_ctx = NULL;
@@ -264,8 +266,6 @@ static void ssl_gc_init(struct tls_child *qry)
 static void fmt_ssl_resp(struct tls_child *qry) {
 	char addrstr[INET6_ADDRSTRLEN];
         char dst_addr_str[(INET6_ADDRSTRLEN+1)];
-	void *ptr = NULL;
-	struct timeval asap = { 0, 100 };
 
 	int fw = get_atlas_fw_version();
 	int lts =  -1 ; /*  get_timesync(); */
@@ -344,7 +344,6 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 		if (x509 != NULL) {
 			BUF_MEM *bptr;
 			int i;
-		       	int j = 0;
 			BIO *b64 = BIO_new (BIO_s_mem());
 			printf ("check the cert \n");
 			PEM_write_bio_X509(b64, x509);
@@ -880,7 +879,7 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = FALSE;
+	pqry->opt_all_tests = TRUE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
@@ -909,9 +908,9 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
  
 static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_curr, int sslv) 
 {
+	struct  tls_child *qry = xzalloc(sizeof(struct tls_child));
 
 	pqry->active++;
-	struct  tls_child *qry = xzalloc(sizeof(struct tls_child));
 	qry->next = pqry->c;
 	pqry->c = qry;
 	qry->addr_curr = addr_curr;
@@ -924,12 +923,13 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 	qry->sslv  = sslv;
 	qry->tls_incomplete = TRUE;
 	tls_child_start(qry, "ALL:COMPLEMENTOFALL");
+
+	return FALSE;
 }
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 {
 	struct tls_state *pqry = (struct tls_state *) ctx;
-	struct bufferevent *bev;
 	struct evutil_addrinfo *cur;
 
 	if (result != 0)
