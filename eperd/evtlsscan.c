@@ -71,6 +71,7 @@ struct tls_state {
 
 	struct evutil_addrinfo *addr;
 	struct timeval start_time;
+	struct event free_inst_ev;
 
 	char *port;
 	char do_get;
@@ -131,7 +132,6 @@ struct tls_child {
 
 	struct event timeout_ev;
 	struct event free_child_ev;
-	struct event free_pqry_ev;
 	bool gc;
 	bool tls_incomplete;
 	enum readstate readstate;
@@ -160,7 +160,7 @@ static void done_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, vo
 	pqry->done(pqry);
 }
 
-static void free_qry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
+static void free_pqry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
 {
 	struct tls_state *pqry = h;
 	if(pqry->err.size)
@@ -210,7 +210,10 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 
 int tlsscan_delete (void *st) 
 {
-	struct tls_state *pqry = st;
+	struct tls_state *pqry = st; 
+	if (pqry == NULL)
+		return 0;
+
 	if (pqry->state )
 		return 0;
 
@@ -219,19 +222,19 @@ int tlsscan_delete (void *st)
 		pqry->result = NULL;
 	}
 
-	if(pqry->out_filename)
+	if (pqry->out_filename != NULL)
 	{
 		free(pqry->out_filename);
 		pqry->out_filename = NULL ;
 	}
 
-	if( pqry->str_Atlas)
+	if( pqry->str_Atlas != NULL)
 	{
 		free(pqry->str_Atlas);
 		pqry->str_Atlas = NULL;
 	}
 
-	if( pqry->host)
+	if (pqry->host != NULL)
 	{
 		free(pqry->host);
 		pqry->host = NULL;
@@ -550,7 +553,7 @@ void fmt_ssl_resp(struct tls_child *qry) {
 			JS(id, qry->p->str_Atlas);
 		}
 		JD(fw, fw);
-		JD(dnscout, qry->p->dns_count);
+		JD(dnscount, qry->p->dns_count);
 		JS1(time, %ld, qry->p->start_time.tv_sec);
 		JD(lts,lts); // fix me take lts when I create start time.
 		AS("\"resultset\" : [ {");
@@ -686,11 +689,10 @@ void print_ssl_resp(struct tls_child *qry) {
 		if (qry->p->out_filename)
 			fclose(fh);
 
-
 		qry->p->state = STATUS_FREE;
 		qry->retry = 0;
 		asap.tv_usec *= 2;
-		evtimer_add(&qry->free_pqry_ev, &asap);
+		evtimer_add(&qry->p->free_inst_ev, &asap);
 	} 
 	else {
 		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
@@ -802,7 +804,7 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 static void local_exit(void *state UNUSED_PARAM)
 {
 
-	struct timeval asap = { 0, 0 };
+	struct timeval asap = { 0, 2 };
 	fprintf(stderr, "And we are done\n");
 	event_base_loopexit (EventBase,  &asap);
 	return;
@@ -819,18 +821,18 @@ static bool tls_arg_validate (int argc, char *argv[], struct tls_state *pqry )
 	if (optind != argc-1)  {
 		crondlog(LVL9 "ERROR no server IP address in input");
 		tlsscan_delete(pqry);
-		return FALSE;
+		return TRUE;
 	}
 	else {
 		pqry->host = strdup(argv[optind]); 
 	}
 	if (pqry->opt_all_tests ) {
-		// pqry->opt_ssl_v3 = SSL3_VERSION;
-		// pqry->opt_tls_v1 =  TLS1_VERSION;
-		// pqry->opt_tls_v11 = TLS1_1_VERSION;
+		pqry->opt_ssl_v3 = SSL3_VERSION;
+		pqry->opt_tls_v1 =  TLS1_VERSION;
+		pqry->opt_tls_v11 = TLS1_1_VERSION;
 		pqry-> opt_tls_v12 = TLS1_2_VERSION;
 	} 
-	return TRUE;
+	return FALSE;
 }
 
 /* eperd call this to initialize */
@@ -868,7 +870,7 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = TRUE;
+	pqry->opt_all_tests = FALSE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
@@ -883,16 +885,14 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 			case '6':
 				pqry->opt_v6 = 1;
 				break;
-
 		}
 	}
 
-	if (!tls_arg_validate(argc, argv, pqry))
+	if (tls_arg_validate(argc, argv, pqry))
 	{
 		crondlog(LVL8 "tls_arg_validate failed");
 		return NULL; 
 	} 
-
 
 	return pqry;
 }
@@ -911,11 +911,9 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 	qry->result = pqry->result;
 	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
-	evtimer_assign(&qry->free_pqry_ev, EventBase, free_qry_inst_cb, qry);
 	qry->sslv  = sslv;
 	qry->tls_incomplete = TRUE;
 	tls_child_start(qry, "ALL:COMPLEMENTOFALL");
-
 }
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
@@ -1012,7 +1010,6 @@ void tlsscan_start (struct tls_state *pqry)
 			printErrorQuick(pqry);
 			/* this query is still active. can't start another one */
 			return;
-
 	}
 
 	gettimeofday(&pqry->start_time, NULL);
@@ -1031,17 +1028,19 @@ void tlsscan_start (struct tls_state *pqry)
 
 	(void) evdns_getaddrinfo(DnsBase, pqry->host, "443", &pqry->hints,
 			dns_cb, pqry);
+	evtimer_assign(&pqry->free_inst_ev, EventBase, free_pqry_inst_cb, pqry);
 } 
 
 int evtlsscan_main(int argc, char **argv) MAIN_EXTERNALLY_VISIBLE;
 int evtlsscan_main(int argc, char **argv)
 {
-	struct tls_state *qry = NULL;
+	struct tls_state *pqry = NULL; /* instance per host(user input) */
 
 	EventBase = event_base_new();
 	if (!EventBase)
 	{
 		crondlog(LVL9 "ERROR: critical event_base_new failed"); /* exits */
+		return 1;
 	}
 
 	DnsBase = evdns_base_new(EventBase, 1);
@@ -1051,15 +1050,15 @@ int evtlsscan_main(int argc, char **argv)
 		return 1;
 	}
 
-	qry = tlsscan_init(argc, argv, local_exit);
+	pqry = tlsscan_init(argc, argv, local_exit);
 
-	if(qry == NULL) {
+	if(pqry == NULL) {
 		crondlog(DIE9 "ERROR: critical tlsscan_init failed"); /* exits */
 		event_base_free (EventBase);
 		return 1;
 	}
 
-	tlsscan_start(qry);
+	tlsscan_start(pqry);
 
 	event_base_dispatch(EventBase);
 	event_base_loopbreak (EventBase);
