@@ -151,9 +151,11 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
 static void write_cb(struct bufferevent *bev, void *ptr);
 void print_tls_resp(struct tls_child *qry);
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr);
+static void timeout_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
+static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
+static bool tls_child_start (struct tls_child *qry, const char * cipher_list);
 
 static struct tls_base *tls_base = NULL; 
-
 
 static void done_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h) {
 	struct tls_state *pqry = h;
@@ -178,6 +180,46 @@ static void free_pqry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSE
 		pqry->addr = NULL;
 	}
 }
+
+static void ssl_gc_init(struct tls_child *qry)
+{
+	int i;
+	const char *p;
+	SSL *ssl = SSL_new(qry->ssl_ctx);
+
+	for (i=0; ; i++)
+	{
+		p=SSL_get_cipher_list(ssl,i);
+
+		if (p == NULL) {
+			printf ("%d got null" , i);
+			break;
+		}
+		if (strlen(p) && strncmp(p, qry->cipher_list, strlen(p)) == 0)
+			continue;
+
+		qry->p->active++;
+		struct  tls_child *gcqry = xzalloc(sizeof(struct tls_child));
+		gcqry->next = qry->p->c;
+		qry->p->c = gcqry;
+		qry->tls_incomplete = TRUE;
+
+		gcqry->p = qry->p;
+
+		qry->p->q_serial++;
+		qry->serial =  qry->p->q_serial;
+		
+		gcqry->addr_curr = qry->addr_curr;
+		gcqry->result = qry->result;
+		evtimer_assign(&gcqry->timeout_ev, EventBase, timeout_cb, gcqry);
+		evtimer_assign(&gcqry->free_child_ev, EventBase, free_child_cb, gcqry);
+		gcqry->sslv  = qry->sslv;
+		crondlog_aa(LVL7, "grand child %s %s %s active = %d %s %s",  __func__,
+				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, p);
+		tls_child_start(gcqry, p);
+		gcqry->gc = TRUE;
+	}
+}	
 
 static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
 {
@@ -208,14 +250,197 @@ static void free_child_cb  (int unused  UNUSED_PARAM, const short event UNUSED_P
 	evtimer_del(&qry->timeout_ev);
 }
 
+static void fmt_ssl_resp(struct tls_child *qry) {
+	char addrstr[INET6_ADDRSTRLEN];
+        char dst_addr_str[(INET6_ADDRSTRLEN+1)];
+	void *ptr = NULL;
+	struct timeval asap = { 0, 100 };
+
+	int fw = get_atlas_fw_version();
+	int lts =  -1 ; /*  get_timesync(); */
+
+	qry->p->active--;
+	qry->p->q_done++;
+
+
+	/* if it is failed grand child qury do not print anything */
+	if (qry->gc && qry->tls_incomplete ){
+		if(qry->err.size)
+		{
+			buf_cleanup(&qry->err);
+		}
+		return;
+	}
+
+	if (qry->result->size == 0){
+		AS("RESULT { ");
+		if(qry->p->str_Atlas) 
+		{
+			JS(id, qry->p->str_Atlas);
+		}
+		JD(fw, fw);
+		JD(dnscount, qry->p->dns_count);
+		JS1(time, %ld, qry->p->start_time.tv_sec);
+		JD(lts,lts); // fix me take lts when I create start time.
+		AS("\"resultset\" : [ {");
+	}
+	else {
+		AS (",{");
+	}
+
+	if(qry->retry) {
+		JD(retry, qry->retry);
+	}
+
+	JS1(time, %ld,  qry->start_time.tv_sec);
+	JD(lts,lts);
+
+	if (qry->addrstr[0] !=  '\0') {
+		if(strcmp(qry->addrstr, qry->p->host)) {
+			JS(dst_name, qry->p->host);
+		}
+		JS(dst_addr , qry->addrstr);
+
+		if(qry->loc_sin6.sin6_family) {
+			getnameinfo((struct sockaddr *)&qry->loc_sin6,
+					qry->loc_socklen, addrstr, INET6_ADDRSTRLEN,
+					NULL, 0, NI_NUMERICHOST);
+			if(strlen(addrstr))
+				JS(src_addr, addrstr);
+			JD(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4);
+		}
+	}
+	else if (qry->p->host) {
+		JS(dst_name, qry->p->host);
+	}
+
+	JS(ciphers, qry->cipher_list);
+	JS_NC(version, qry->sslv_str);
+
+	if ((qry->ssl_ctx != NULL) && (qry->ssl != NULL) && (qry->tls_incomplete != 0)) {
+		X509 *x509 = NULL;
+		qry->p->q_success++;
+		AS(","); 
+		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
+
+		if ((qry->gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
+			/* this is a successful child. 
+			 * create grand children with algorithm varients 
+			 */
+			ssl_gc_init(qry);
+		}		
+		x509 = SSL_get_peer_certificate(qry->ssl);
+		if (x509 != NULL) {
+			BUF_MEM *bptr;
+			int i;
+		       	int j = 0;
+			BIO *b64 = BIO_new (BIO_s_mem());
+			printf ("check the cert \n");
+			PEM_write_bio_X509(b64, x509);
+			BIO_get_mem_ptr(b64, &bptr); 
+			
+			if (bptr->length < 0) {
+				AS(", cert : [\""); 
+				for (i  = 0; i < bptr->length;  i++) {
+					if (bptr->data[i] == '\n') {
+						AS("\\");
+					}
+					/* this could be more efficient ? */
+					buf_add(qry->result, bptr->data[i], 1);
+				} 
+				AS("\""); 
+			}
+			
+		}
+	}
+
+	if(qry->err.size) 
+	{
+		AS(", \"error\" : {");
+		buf_add(qry->result, qry->err.buf, qry->err.size);
+		AS("}"); 
+	}
+
+	AS (" }"); //result 
+}
+
+
+
+static void print_ssl_resp(struct tls_child *qry) {
+
+	bool write_out = FALSE;
+	struct timeval asap = { 0, 10 };
+	FILE *fh;
+	struct tls_state *pqry = qry->p;
+
+	fmt_ssl_resp(qry);
+	evtimer_add(&qry->free_child_ev, &asap);
+
+	if (qry->p->active < 1) {
+		write_out = TRUE;
+	}
+	else {
+		crondlog_aa(LVL5, "waiting for more %d queries", qry->p->active);
+	}
+
+	if(write_out) {
+		write_out = TRUE;
+		if (qry->p->done) 
+			evtimer_add(&qry->p->done_ev, &asap);
+	}
+
+	if(write_out && qry->result->size) {
+		/* end of result only JSON closing brackets from here on */
+		AS("]");  /* resultset : [{}..] */
+
+		AS (",");
+		JD(queries, qry->p->q_serial);
+		JD_NC(success, qry->p->q_success);
+		AS (" }\n");   /* RESULT { } . end of RESULT line */
+		
+		if (qry->p->out_filename)
+		{
+			fh= fopen(qry->p->out_filename, "a");
+			if (!fh) {
+				crondlog(LVL8 "unable to append to '%s'",
+						qry->p->out_filename);
+			}
+		}
+		else
+			fh = stdout;
+
+		if (fh) {
+			fwrite(qry->result->buf, qry->result->size, 1 , fh);
+		}
+		buf_cleanup(qry->result);
+
+		if (qry->p->out_filename)
+			fclose(fh);
+
+		qry->p->state = STATUS_FREE;
+		qry->retry = 0;
+		asap.tv_usec *= 2;
+		evtimer_add(&qry->p->free_inst_ev, &asap);
+	} 
+	else {
+		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
+				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
+	}
+
+}
+
 int tlsscan_delete (void *st) 
 {
-	struct tls_state *pqry = st; 
+	struct tls_state *pqry = st; /* eperd call with void pointer */
+
 	if (pqry == NULL)
 		return 0;
 
-	if (pqry->state )
+	if (pqry->state != STATUS_FREE)
+	{
+		/*  can't delete this query yet. eperd will call us again */
 		return 0;
+	}
 
 	if (pqry->result != NULL) {
 		free(pqry->result);
@@ -241,24 +466,6 @@ int tlsscan_delete (void *st)
 	}
 
 	return 1;
-}
-
-static void timeout_cb(int unused  UNUSED_PARAM, const short event
-		UNUSED_PARAM, void *h)
-{
-	struct tls_child *qry = (struct tls_child *)h;
-	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
-			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
-
-	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
-	buf_add(&qry->err, line, strlen(line));
-
-	if(qry->ssl != NULL) {
-		SSL_free(qry->ssl);
-		qry->ssl = NULL;
-	}
-
-	print_ssl_resp(qry);
 }
 
 /* Initialize a struct timeval by converting milliseconds */
@@ -482,225 +689,6 @@ static bool tls_child_start (struct tls_child *qry, const char * cipher_list)
 	}
 	return FALSE;
 }
-
-
-static void ssl_gc_init(struct tls_child *qry)
-{
-	int i;
-	const char *p;
-	SSL *ssl = SSL_new(qry->ssl_ctx);
-
-	for (i=0; ; i++)
-	{
-		p=SSL_get_cipher_list(ssl,i);
-
-		if (p == NULL) {
-			printf ("%d got null" , i);
-			break;
-		}
-		if (strlen(p) && strncmp(p, qry->cipher_list, strlen(p)) == 0)
-			continue;
-
-		qry->p->active++;
-		struct  tls_child *gcqry = xzalloc(sizeof(struct tls_child));
-		gcqry->next = qry->p->c;
-		qry->p->c = gcqry;
-		qry->tls_incomplete = TRUE;
-
-		gcqry->p = qry->p;
-
-		qry->p->q_serial++;
-		qry->serial =  qry->p->q_serial;
-		
-		gcqry->addr_curr = qry->addr_curr;
-		gcqry->result = qry->result;
-		evtimer_assign(&gcqry->timeout_ev, EventBase, timeout_cb, gcqry);
-		evtimer_assign(&gcqry->free_child_ev, EventBase, free_child_cb, gcqry);
-		gcqry->sslv  = qry->sslv;
-		crondlog_aa(LVL7, "grand child %s %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, p);
-		tls_child_start(gcqry, p);
-		gcqry->gc = TRUE;
-	}
-}	
-
-void fmt_ssl_resp(struct tls_child *qry) {
-	char addrstr[INET6_ADDRSTRLEN];
-        char dst_addr_str[(INET6_ADDRSTRLEN+1)];
-	void *ptr = NULL;
-	struct timeval asap = { 0, 100 };
-
-	int fw = get_atlas_fw_version();
-	int lts =  -1 ; /*  get_timesync(); */
-
-	qry->p->active--;
-	qry->p->q_done++;
-
-
-	/* if it is failed grand child qury do not print anything */
-	if (qry->gc && qry->tls_incomplete ){
-		if(qry->err.size)
-		{
-			buf_cleanup(&qry->err);
-		}
-		return;
-	}
-
-	if (qry->result->size == 0){
-		AS("RESULT { ");
-		if(qry->p->str_Atlas) 
-		{
-			JS(id, qry->p->str_Atlas);
-		}
-		JD(fw, fw);
-		JD(dnscount, qry->p->dns_count);
-		JS1(time, %ld, qry->p->start_time.tv_sec);
-		JD(lts,lts); // fix me take lts when I create start time.
-		AS("\"resultset\" : [ {");
-	}
-	else {
-		AS (",{");
-	}
-
-	if(qry->retry) {
-		JD(retry, qry->retry);
-	}
-
-	JS1(time, %ld,  qry->start_time.tv_sec);
-	JD(lts,lts);
-
-	if (qry->addrstr[0] !=  '\0') {
-		if(strcmp(qry->addrstr, qry->p->host)) {
-			JS(dst_name, qry->p->host);
-		}
-		JS(dst_addr , qry->addrstr);
-
-		if(qry->loc_sin6.sin6_family) {
-			getnameinfo((struct sockaddr *)&qry->loc_sin6,
-					qry->loc_socklen, addrstr, INET6_ADDRSTRLEN,
-					NULL, 0, NI_NUMERICHOST);
-			if(strlen(addrstr))
-				JS(src_addr, addrstr);
-			JD(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4);
-		}
-	}
-	else if (qry->p->host) {
-		JS(dst_name, qry->p->host);
-	}
-
-	JS(ciphers, qry->cipher_list);
-	JS_NC(version, qry->sslv_str);
-
-	if ((qry->ssl_ctx != NULL) && (qry->ssl != NULL) && (qry->tls_incomplete != 0)) {
-		X509 *x509 = NULL;
-		qry->p->q_success++;
-		AS(","); 
-		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
-
-		if ((qry->gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
-			/* this is a successful child. 
-			 * create grand children with algorithm varients 
-			 */
-			ssl_gc_init(qry);
-		}		
-		x509 = SSL_get_peer_certificate(qry->ssl);
-		if (x509 != NULL) {
-			BUF_MEM *bptr;
-			int i;
-		       	int j = 0;
-			BIO *b64 = BIO_new (BIO_s_mem());
-			printf ("check the cert \n");
-			PEM_write_bio_X509(b64, x509);
-			BIO_get_mem_ptr(b64, &bptr); 
-			
-			if (bptr->length < 0) {
-				AS(", cert : [\""); 
-				for (i  = 0; i < bptr->length;  i++) {
-					if (bptr->data[i] == '\n') {
-						AS("\\");
-					}
-					/* this could be more efficient ? */
-					buf_add(qry->result, bptr->data[i], 1);
-				} 
-				AS("\""); 
-			}
-			
-		}
-	}
-
-	if(qry->err.size) 
-	{
-		AS(", \"error\" : {");
-		buf_add(qry->result, qry->err.buf, qry->err.size);
-		AS("}"); 
-	}
-
-	AS (" }"); //result 
-}
-
-void print_ssl_resp(struct tls_child *qry) {
-
-	bool write_out = FALSE;
-	struct timeval asap = { 0, 10 };
-	FILE *fh;
-	struct tls_state *pqry = qry->p;
-
-	fmt_ssl_resp(qry);
-	evtimer_add(&qry->free_child_ev, &asap);
-
-	if (qry->p->active < 1) {
-		write_out = TRUE;
-	}
-	else {
-		crondlog_aa(LVL5, "waiting for more %d queries", qry->p->active);
-	}
-
-	if(write_out) {
-		write_out = TRUE;
-		if (qry->p->done) 
-			evtimer_add(&qry->p->done_ev, &asap);
-	}
-
-	if(write_out && qry->result->size) {
-		/* end of result only JSON closing brackets from here on */
-		AS("]");  /* resultset : [{}..] */
-
-		AS (",");
-		JD(queries, qry->p->q_serial);
-		JD_NC(success, qry->p->q_success);
-		AS (" }\n");   /* RESULT { } . end of RESULT line */
-		
-		if (qry->p->out_filename)
-		{
-			fh= fopen(qry->p->out_filename, "a");
-			if (!fh) {
-				crondlog(LVL8 "unable to append to '%s'",
-						qry->p->out_filename);
-			}
-		}
-		else
-			fh = stdout;
-
-		if (fh) {
-			fwrite(qry->result->buf, qry->result->size, 1 , fh);
-		}
-		buf_cleanup(qry->result);
-
-		if (qry->p->out_filename)
-			fclose(fh);
-
-		qry->p->state = STATUS_FREE;
-		qry->retry = 0;
-		asap.tv_usec *= 2;
-		evtimer_add(&qry->p->free_inst_ev, &asap);
-	} 
-	else {
-		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
-	}
-
-}
-
 
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 {
@@ -1082,4 +1070,23 @@ void crondlog_aa(const char *ctl, ...)
 	va_end(va);
 	if (ctl[0] & 0x80)
 		exit(20);
+}
+
+static void timeout_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
+{
+	struct tls_child *qry = (struct tls_child *)h;
+	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
+			qry->p->host, qry->addrstr,
+			qry->p->active, qry->sslv_str, qry->cipher_list);
+
+	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "",
+			DEFAULT_NOREPLY_TIMEOUT);
+	buf_add(&qry->err, line, strlen(line));
+
+	if(qry->ssl != NULL) {
+		SSL_free(qry->ssl);
+		qry->ssl = NULL;
+	}
+
+	print_ssl_resp(qry);
 }
