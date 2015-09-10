@@ -144,7 +144,6 @@ int tlsscan_delete (void *st);
 void tlsscan_start (struct tls_state *pqry);
 bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
 static void write_cb(struct bufferevent *bev, void *ptr);
-void print_tls_resp(struct tls_child *qry);
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr);
 static void timeout_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
 static bool tls_child_start (struct tls_child *qry, const char * cipher_list);
@@ -343,7 +342,7 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 	JS1(time, %ld,  qry->start_time.tv_sec);
 	JD(lts,lts);
 
-	if (qry->addrstr[0] !=  '\0') {
+	if ((qry->addr_curr != NULL) && (qry->addrstr[0] !=  '\0')) {
 		if(strcmp(qry->addrstr, qry->p->host)) {
 			JS(dst_name, qry->p->host);
 		}
@@ -355,15 +354,22 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 					NULL, 0, NI_NUMERICHOST);
 			if(strlen(addrstr))
 				JS(src_addr, addrstr);
-			JD(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4);
 		}
+		JD_NC(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4);
 	}
 	else if (qry->p->host) {
-		JS(dst_name, qry->p->host);
+		JS_NC(dst_name, qry->p->host);
 	}
 
-	JS(ciphers, qry->cipher_list);
-	JS_NC(version, qry->sslv_str);
+	if (qry->cipher_list != NULL) {
+		AS (", ");
+		JS_NC(ciphers, qry->cipher_list);
+	}
+
+	if (qry->sslv_str != NULL) {
+		AS (", ");
+		JS_NC(version, qry->sslv_str);
+	}
 
 	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
 			(qry->tls_incomplete != 0)) {
@@ -382,24 +388,30 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 		}
 	}
 
-	if(qry->err.size)
+	if ((qry->err.size > 0) || (qry->p->err.size > 0))
 	{
 		AS(", \"error\" : {");
-		buf_add(qry->result, qry->err.buf, qry->err.size);
+		if (qry->err.size > 0) {
+			buf_add(qry->result, qry->err.buf, qry->err.size);
+		}
+		if (qry->p->err.size > 0) {
+			buf_add(qry->result, qry->p->err.buf, qry->p->err.size);
+		}
 		AS("}");
 	}
-
 	AS (" }"); //result
 }
 
-static void print_ssl_resp(struct tls_child *qry, bool is_err) {
+static void print_tls_resp(struct tls_child *qry, bool is_err) {
 
 	bool write_out = FALSE;
 	struct timeval asap = { 0, 10 };
 	FILE *fh;
 	struct tls_state *pqry = qry->p;
 
-	qry->p->active--;
+	if (qry->p->active > 0)
+		qry->p->active--;
+
 	qry->p->q_done++;
 
 	fmt_ssl_resp(qry, is_err);
@@ -492,13 +504,17 @@ static void timeout_cb(int unused  UNUSED_PARAM, const short event
 		UNUSED_PARAM, void *h)
 {
 	struct tls_child *qry = (struct tls_child *)h;
-	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
-			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 
-	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
-	buf_add(&qry->err, line, strlen(line));
+	if(qry->addr_curr == NULL) {
+		crondlog_aa(LVL7, "%s %s",  __func__, qry->p->host);
+	} else {
+		crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
+				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 
-	print_ssl_resp(qry, TRUE);
+		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
+		buf_add(&qry->err, line, strlen(line));
+	}
+	print_tls_resp(qry, TRUE);
 }
 
 /* Initialize a struct timeval by converting milliseconds */
@@ -734,7 +750,7 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 				qry->err.size ? ", " : "",
 				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
 		buf_add(&qry->err, line, strlen(line));
-		print_ssl_resp(qry, TRUE);
+		print_tls_resp(qry, TRUE);
 		return;
 	}
 
@@ -767,7 +783,7 @@ static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
 			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	evtimer_del(&qry->timeout_ev);
-	print_ssl_resp(qry, FALSE);
+	print_tls_resp(qry, FALSE);
 	qry->tls_incomplete = FALSE;
 	bufferevent_free(qry->bev);
 	qry->bev = NULL;
@@ -929,17 +945,25 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 {
 	struct  tls_child *qry = xzalloc(sizeof(struct tls_child));
 
-	pqry->active++;
 	qry->next = pqry->c;
 	pqry->c = qry;
 	qry->addr_curr = addr_curr;
 	qry->p = pqry;
+
+	pqry->active++;
 	qry->p->q_serial++;
 	qry->serial =  qry->p->q_serial;
 	qry->result = &pqry->result;
-	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
+	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	qry->sslv  = sslv;
+
+	if (addr_curr == NULL) {
+		struct timeval asap = { 0, 0};
+		evtimer_add(&qry->timeout_ev, &asap);
+		return FALSE;
+	}
+
 	qry->tls_incomplete = TRUE;
 	tls_child_start(qry, "ALL:COMPLEMENTOFALL");
 
@@ -949,7 +973,10 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 {
 	struct tls_state *pqry = (struct tls_state *) ctx;
-	struct evutil_addrinfo *cur;
+	struct evutil_addrinfo *cur = NULL;
+
+	pqry->addr = res;
+	pqry->dns_count =  0;
 
 	if (result != 0)
 	{
@@ -957,12 +984,10 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 				pqry->err.size ? ", " : "",
 				evutil_gai_strerror(result));
 		buf_add(&pqry->err, line, strlen(line));
-		// buf_add(&pqry->err, line, strlen(line));
-		// fixme print_ssl_resp(qry);
+		pqry->addr = NULL;
+		tls_child_init(pqry, cur, 0);
 		return;
 	}
-	pqry->addr = res;
-	pqry->dns_count =  0;
 
 	for (cur = res; cur != NULL; cur = cur->ai_next) {
 		pqry->dns_count++;
