@@ -17,8 +17,6 @@
 #include "eperd.h"
 
 #define SUFFIX 		".curr"
-#define OOQD_NEW_PREFIX	"/home/atlas/data/new/ooq"
-#define OOQD_OUT_PREFIX	"/home/atlas/data/out/ooq"
 #define ATLAS_SESSION_FILE	"/home/atlas/status/con_session_id.txt"
 
 #define ATLAS_NARGS	64	/* Max arguments to a built-in command */
