@@ -83,6 +83,7 @@ struct tls_state {
 	int active; /* how many pending additional quries per query */
 	int retry;
 
+	bool opt_certs;
 	int opt_retry_max;
 	int opt_ignore_cert;
 
@@ -261,7 +262,12 @@ static void ssl_gc_init(struct tls_child *qry)
 static void add_result_certs (struct tls_child *qry)
 {
 	int i;
-	STACK_OF(X509) *sk = SSL_get_peer_cert_chain(qry->ssl);
+	STACK_OF(X509) *sk;
+
+	if(!qry->p->opt_certs)
+		return;
+
+	sk = SSL_get_peer_cert_chain(qry->ssl);
 
 	if (sk == NULL)
 		return;
