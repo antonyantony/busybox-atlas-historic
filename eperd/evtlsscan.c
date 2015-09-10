@@ -40,14 +40,12 @@
 #define STATUS_FREE 0
 #define STATUS_START 1001
 
-
 enum readstate { READ_FIRST, READ_STATUS, READ_HEADER, READ_BODY, READ_SIMPLE,
 	READ_CHUNKED, READ_CHUNK_BODY, READ_CHUNK_END,
 	READ_CHUNKED_TRAILER,
 	READ_DONE };
 enum writestate { WRITE_FIRST, WRITE_HEADER, WRITE_POST_HEADER,
 	WRITE_POST_FILE, WRITE_POST_FOOTER, WRITE_DONE };
-
 
 /* struct common for all quries */
 struct tls_base {
@@ -211,7 +209,7 @@ static void free_child_cb(int unused  UNUSED_PARAM, const short event UNUSED_PAR
 		qry->ssl_ctx = NULL;
 	}
 	evtimer_del(&qry->timeout_ev);
-} 
+}
 
 static void ssl_gc_init(struct tls_child *qry)
 {
@@ -261,7 +259,52 @@ static void ssl_gc_init(struct tls_child *qry)
 	SSL_free(ssl);
 }
 
-static void fmt_ssl_resp(struct tls_child *qry) {
+static void add_result_certs (struct tls_child *qry)
+{
+	int i;
+	STACK_OF(X509) *sk = SSL_get_peer_cert_chain(qry->ssl);
+
+	if (sk == NULL)
+		return;
+
+	for (i=0; i<sk_X509_num(sk); i++) {
+		X509* cert =  sk_X509_value(sk,i);
+		BUF_MEM *bptr;
+		int j;
+		BIO *b64 = BIO_new (BIO_s_mem());
+		char *c; /* pointer to loop over */
+
+		PEM_write_bio_X509(b64, cert);
+		BIO_get_mem_ptr(b64, &bptr);
+
+		if (bptr->length > 0) {
+			if (i == 0) {
+				AS(", \"certs\" : [");
+			}
+			if ( i > 0 )
+				AS(", ");
+			AS("\"");
+			c =  bptr->data;
+			for (j  = 0; j < bptr->length;  j++) {
+				if (*c == '\n') {
+					AS("\\n");
+				}
+				else {
+					/* this could be more efficient ? */
+					buf_add(qry->result, c, 1);
+				}
+				c++;
+			}
+			AS("\"");
+		}
+	}
+	if ( i  > 0) {
+		AS("]"); /* certs [] */
+	}
+}
+
+static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
+{
 	char addrstr[INET6_ADDRSTRLEN];
         char dst_addr_str[(INET6_ADDRSTRLEN+1)];
 
@@ -322,56 +365,20 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 	JS(ciphers, qry->cipher_list);
 	JS_NC(version, qry->sslv_str);
 
-	if ((qry->ssl_ctx != NULL) && (qry->ssl != NULL) && (qry->tls_incomplete != 0)) {
-		STACK_OF(X509) *sk;
+	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
+			(qry->tls_incomplete != 0)) {
 		int i;
 		qry->p->q_success++;
 		AS(",");
 		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
+
+		add_result_certs (qry);
 
 		if ((qry->gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
 			/* this is a successful child. 
 			 * create grand children with algorithm varients 
 			 */
 			ssl_gc_init(qry);
-		}
-
-		sk=SSL_get_peer_cert_chain(qry->ssl);
-		if (sk != NULL) {
-			for (i=0; i<sk_X509_num(sk); i++) {
-				X509* cert =  sk_X509_value(sk,i);
-				BUF_MEM *bptr;
-				int j;
-				BIO *b64 = BIO_new (BIO_s_mem());
-				char *c; /* pointer to loop over */
-
-				PEM_write_bio_X509(b64, cert);
-				BIO_get_mem_ptr(b64, &bptr); 
-
-				if (bptr->length > 0) {
-					if (i == 0) { 
-						AS(", \"certs\" : ["); 
-					}
-					if ( i > 0 )
-						AS(", "); 
-					AS("\""); 
-					c =  bptr->data;
-					for (j  = 0; j < bptr->length;  j++) {
-						if (*c == '\n') {
-							AS("\\n");
-						} 
-						else {
-							/* this could be more efficient ? */
-							buf_add(qry->result, c, 1);
-						}
-						c++;
-					}
-					AS("\""); 
-				}
-			}
-			if ( i  > 0) {
-				AS("]"); /* certs [] */
-			}
 		}
 	}
 
@@ -382,10 +389,10 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 		AS("}");
 	}
 
-	AS (" }"); //result 
+	AS (" }"); //result
 }
 
-static void print_ssl_resp(struct tls_child *qry) {
+static void print_ssl_resp(struct tls_child *qry, bool is_err) {
 
 	bool write_out = FALSE;
 	struct timeval asap = { 0, 10 };
@@ -395,7 +402,7 @@ static void print_ssl_resp(struct tls_child *qry) {
 	qry->p->active--;
 	qry->p->q_done++;
 
-	fmt_ssl_resp(qry);
+	fmt_ssl_resp(qry, is_err);
 
 	evtimer_add(&qry->free_child_ev, &asap);
 
@@ -491,7 +498,7 @@ static void timeout_cb(int unused  UNUSED_PARAM, const short event
 	snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
 	buf_add(&qry->err, line, strlen(line));
 
-	print_ssl_resp(qry);
+	print_ssl_resp(qry, TRUE);
 }
 
 /* Initialize a struct timeval by converting milliseconds */
@@ -527,7 +534,7 @@ static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
 
 	server_cert = X509_STORE_CTX_get_current_cert(x509_ctx);
 
-	if (server_cert  == NULL) 
+	if (server_cert  == NULL)
 		return 0;
 
 	if (ok_so_far) {
@@ -571,9 +578,6 @@ static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
 		return 1;
 	}
 }
-
-
-
 
 static bool verify_ssl_cert (struct tls_child *qry) {
 
@@ -691,14 +695,14 @@ static bool tls_child_start (struct tls_child *qry, const char * cipher_list)
 					qry->addr_curr->ai_addr)->sin6_addr;
 		}
 		inet_ntop (qry->addr_curr->ai_family, ptr, qry->addrstr, INET6_ADDRSTRLEN);
-		crondlog_aa(LVL7, "connect to %s %s active = %d %s %s", 
+		crondlog_aa(LVL7, "connect to %s %s active = %d %s %s",
 				qry->addrstr, qry->p->host, qry->p->active, qry->sslv_str, qry->cipher_list);
 	}
 
 	if (bufferevent_socket_connect(qry->bev,
 				qry->addr_curr->ai_addr,
 				qry->addr_curr->ai_addrlen)) {
-		crondlog_aa(LVL8, "ERROR bufferevent_socket_connect to %s %s" 
+		crondlog_aa(LVL8, "ERROR bufferevent_socket_connect to %s \"%s\""
 				"ctive = %d %s %s - %s", qry->addrstr, qry->p->host, 
 				qry->p->active, qry->sslv_str, qry->cipher_list,
 				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR())
@@ -726,9 +730,11 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 
 		evtimer_del(&qry->timeout_ev);
-		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"connect\" : \"connect failed\"", qry->err.size ? ", " : "");
+		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"connect\" : \"%s\"",
+				qry->err.size ? ", " : "",
+				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
 		buf_add(&qry->err, line, strlen(line));
-		print_ssl_resp(qry);
+		print_ssl_resp(qry, TRUE);
 		return;
 	}
 
@@ -761,7 +767,7 @@ static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
 			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	evtimer_del(&qry->timeout_ev);
-	print_ssl_resp(qry);
+	print_ssl_resp(qry, FALSE);
 	qry->tls_incomplete = FALSE;
 	bufferevent_free(qry->bev);
 	qry->bev = NULL;
@@ -838,7 +844,7 @@ static bool tls_arg_validate (int argc, char *argv[], struct tls_state *pqry )
 		return TRUE;
 	}
 	else {
-		pqry->host = strdup(argv[optind]); 
+		pqry->host = strdup(argv[optind]);
 	}
 	if (pqry->opt_all_tests ) {
 		pqry->opt_ssl_v3 = SSL3_VERSION;
@@ -1022,7 +1028,7 @@ static void printErrorQuick (struct tls_state *pqry)
 
 void tlsscan_start (struct tls_state *pqry)
 {
-	switch(pqry->state) 
+	switch(pqry->state)
 	{
 		case STATUS_FREE:
 			pqry->state = STATUS_START;
