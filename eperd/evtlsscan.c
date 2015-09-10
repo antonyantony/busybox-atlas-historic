@@ -879,14 +879,23 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 		evtimer_assign(&pqry->done_ev, EventBase, done_cb, pqry);
 
 	optind = 0;
-	while (c= getopt_long(argc, argv, "46:A:?", longopts, NULL), c != -1) {
+	while (c= getopt_long(argc, argv, "46O:A?", longopts, NULL), c != -1) {
 		switch (c) {
 			case '4':
 				pqry->opt_v4 = 1;
 				break;
+
 			case '6':
 				pqry->opt_v6 = 1;
 				break;
+
+			case 'A':
+				pqry->opt_all_tests = TRUE;
+				break;
+
+			case 'O':
+                                pqry->out_filename = strdup(optarg);
+                                break;
 		}
 	}
 
