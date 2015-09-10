@@ -323,9 +323,10 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 	JS_NC(version, qry->sslv_str);
 
 	if ((qry->ssl_ctx != NULL) && (qry->ssl != NULL) && (qry->tls_incomplete != 0)) {
-		X509 *x509 = NULL;
+		STACK_OF(X509) *sk;
+		int i;
 		qry->p->q_success++;
-		AS(","); 
+		AS(",");
 		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
 
 		if ((qry->gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
@@ -335,31 +336,41 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 			ssl_gc_init(qry);
 		}
 
-		x509 = SSL_get_peer_certificate(qry->ssl);
-		if (x509 != NULL) {
-			BUF_MEM *bptr;
-			int i;
-			BIO *b64 = BIO_new (BIO_s_mem());
-			char *c; /* pointer to loop over */
+		sk=SSL_get_peer_cert_chain(qry->ssl);
+		if (sk != NULL) {
+			for (i=0; i<sk_X509_num(sk); i++) {
+				X509* cert =  sk_X509_value(sk,i);
+				BUF_MEM *bptr;
+				int j;
+				BIO *b64 = BIO_new (BIO_s_mem());
+				char *c; /* pointer to loop over */
 
-			printf ("check the cert \n");
-			PEM_write_bio_X509(b64, x509);
-			BIO_get_mem_ptr(b64, &bptr); 
+				PEM_write_bio_X509(b64, cert);
+				BIO_get_mem_ptr(b64, &bptr); 
 
-			if (bptr->length > 0) {
-				c =  bptr->data;
-				AS(", cert : [\""); 
-				for (i  = 0; i < bptr->length;  i++) {
-					if (*c == '\n') {
-						AS("\\n");
-					} 
-					else {
-					/* this could be more efficient ? */
-						buf_add(qry->result, c, 1);
+				if (bptr->length > 0) {
+					if (i == 0) { 
+						AS(", \"certs\" : ["); 
 					}
-					c++;
-				} 
-				AS("\""); 
+					if ( i > 0 )
+						AS(", "); 
+					AS("\""); 
+					c =  bptr->data;
+					for (j  = 0; j < bptr->length;  j++) {
+						if (*c == '\n') {
+							AS("\\n");
+						} 
+						else {
+							/* this could be more efficient ? */
+							buf_add(qry->result, c, 1);
+						}
+						c++;
+					}
+					AS("\""); 
+				}
+			}
+			if ( i  > 0) {
+				AS("]"); /* certs [] */
 			}
 		}
 	}
@@ -1089,3 +1100,5 @@ static void crondlog_aa(const char *ctl, char *fmt, ...)
 	vsnprintf(buff, 1000 - 1, fmt, va);
 	printf("%s\n", buff);
 }
+
+struct testops tlsscan_ops = {tlsscan_init, tlsscan_start, tlsscan_delete};
