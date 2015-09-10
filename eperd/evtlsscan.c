@@ -268,7 +268,6 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 	int fw = get_atlas_fw_version();
 	int lts =  -1 ; /*  get_timesync(); */
 
-
 	/* if it is failed grand child qury do not print anything */
 	if (qry->gc && qry->tls_incomplete ){
 		if(qry->err.size)
@@ -341,18 +340,24 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 			BUF_MEM *bptr;
 			int i;
 			BIO *b64 = BIO_new (BIO_s_mem());
+			char *c; /* pointer to loop over */
+
 			printf ("check the cert \n");
 			PEM_write_bio_X509(b64, x509);
 			BIO_get_mem_ptr(b64, &bptr); 
 
-			if (bptr->length <  0) { /* AA disabled TBD */
+			if (bptr->length > 0) {
+				c =  bptr->data;
 				AS(", cert : [\""); 
 				for (i  = 0; i < bptr->length;  i++) {
-					if (bptr->data[i] == '\n') {
-						AS("\\");
-					}
+					if (*c == '\n') {
+						AS("\\n");
+					} 
+					else {
 					/* this could be more efficient ? */
-					buf_add(qry->result, bptr->data[i], 1);
+						buf_add(qry->result, c, 1);
+					}
+					c++;
 				} 
 				AS("\""); 
 			}
@@ -368,7 +373,6 @@ static void fmt_ssl_resp(struct tls_child *qry) {
 
 	AS (" }"); //result 
 }
-
 
 static void print_ssl_resp(struct tls_child *qry) {
 
@@ -434,7 +438,6 @@ static void print_ssl_resp(struct tls_child *qry) {
 		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
 				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	}
-
 }
 
 int tlsscan_delete (void *st)
@@ -869,7 +872,7 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->user_agent= "httpget for atlas.ripe.net";
 	pqry->path = "/";
 	pqry->done = done;
-	pqry->opt_all_tests = TRUE;
+	pqry->opt_all_tests = FALSE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
