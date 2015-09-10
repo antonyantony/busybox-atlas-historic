@@ -770,7 +770,7 @@ static struct builtin
 	{ "evping", &ping_ops },
 	{ "evsslgetcert", &sslgetcert_ops },
 	{ "evtdig", &tdig_ops },
-	{ "evtlscan", &tlsscan_ops },
+	{ "evtlsscan", &tlsscan_ops },
 	{ "evtraceroute", &traceroute_ops },
 	{ "condmv", &condmv_ops },
 	{ NULL, NULL }

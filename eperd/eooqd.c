@@ -16,9 +16,7 @@
 #include "atlas_probe.h"
 #include "eperd.h"
 
-#define SUFFIX 		".curr"
-#define OOQD_NEW_PREFIX	"/home/atlas/data/new/ooq"
-#define OOQD_OUT_PREFIX	"/home/atlas/data/out/ooq"
+#define SUFFIX		".curr"
 #define ATLAS_SESSION_FILE	"/home/atlas/status/con_session_id.txt"
 
 #define ATLAS_NARGS	64	/* Max arguments to a built-in command */
@@ -61,6 +59,7 @@ static struct builtin
 	{ "evhttpget", &httpget_ops },
 	{ "evping", &ping_ops },
 	{ "evtdig", &tdig_ops },
+	{ "evtlsscan", &tlsscan_ops },
 	{ "evsslgetcert", &sslgetcert_ops },
 	{ "evtraceroute", &traceroute_ops },
 	{ NULL, NULL }
