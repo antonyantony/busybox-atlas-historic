@@ -59,8 +59,6 @@ static void crondlog_aa(const char *ctl, char *fmt, ...);
 /* How to keep track of each user tlsscan query aka pqry */
 struct tls_state {
 	char *host;
-	char *str_Atlas;
-	char *out_filename;
 	int state;
 	int q_serial;  /* on parent it is the total queries sent */
 	int q_done;
@@ -101,6 +99,8 @@ struct tls_state {
 	int opt_tls_v1;
 	int opt_tls_v11;
 	int opt_tls_v12;
+	char *out_filename;
+	char *str_Atlas; /* option but without opt_ prefix. Historic */
 
 	struct tls_child *c;
 	struct evutil_addrinfo hints;
