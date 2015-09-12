@@ -123,6 +123,7 @@ struct tls_child {
 
 	struct tls_state *p; /* parent object */
 	struct buf *result; /* all children share same result structure as parent */
+	struct rsum  *rs; /* local to this query */
 
 	struct buf err;
 
@@ -253,7 +254,7 @@ static void ssl_gc_init(struct tls_child *qry)
 		qry->tls_incomplete = TRUE;
 		gcqry->p = qry->p;
 		qry->p->q_serial++;
-		qry->serial =  qry->p->q_serial;
+		gcqry->serial =  qry->p->q_serial;
 
 		gcqry->addr_curr = qry->addr_curr;
 		gcqry->result = qry->result;
@@ -371,7 +372,7 @@ static void fmt_ssl_p_result(struct tls_child *qry)
 
 static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 {
-	if(qry->p->rsums->next == NULL) /* this is the first query */
+	if((qry->rs != NULL) && (qry->rs->next == NULL)) /* this is the first query */
 		fmt_ssl_p_result(qry);
 
 	if (qry->result->size == 0){
@@ -392,7 +393,7 @@ static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 			JS_NC(ciphers, qry->cipher_list);
 		}
 		AS (", \"ciphers\" : [");
-	} 
+	}
 	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
 			(qry->tls_incomplete != 0)) {
 		int i;
@@ -477,11 +478,81 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 	AS (" }"); //result
 }
 
+static void write_sum_res(struct tls_child *qry)
+{
+	FILE *fh;
+	/* end of result only JSON closing brackets from here on */
+	AS("]");  /* resultset : [{}..] */
+
+	AS (",");
+	JD(queries, qry->p->q_serial);
+	JD_NC(success, qry->p->q_success);
+	AS (" }\n");   /* RESULT { } . end of RESULT line */
+
+	if (qry->p->out_filename)
+	{
+		fh= fopen(qry->p->out_filename, "a");
+		if (!fh) {
+			crondlog(LVL8 "unable to append to '%s'",
+					qry->p->out_filename);
+		}
+	}
+	else
+		fh = stdout;
+
+	if (fh) {
+
+		struct rsum  *r; /* head of linked list on the parent query */
+		for (r = qry->p->rsums; (r != NULL); r = r->next) {
+			fwrite(r->result->buf, r->result->size, 1 , fh);
+		}
+	}
+	buf_cleanup(qry->result);
+
+	if (qry->p->out_filename)
+		fclose(fh);
+
+	qry->p->state = STATUS_FREE;
+	qry->retry = 0;
+}
+static void write_full_res(struct tls_child *qry)
+{
+	FILE *fh;
+	/* end of result only JSON closing brackets from here on */
+	AS("]");  /* resultset : [{}..] */
+
+	AS (",");
+	JD(queries, qry->p->q_serial);
+	JD_NC(success, qry->p->q_success);
+	AS (" }\n");   /* RESULT { } . end of RESULT line */
+
+	if (qry->p->out_filename)
+	{
+		fh= fopen(qry->p->out_filename, "a");
+		if (!fh) {
+			crondlog(LVL8 "unable to append to '%s'",
+					qry->p->out_filename);
+		}
+	}
+	else
+		fh = stdout;
+
+	if (fh) {
+		fwrite(qry->result->buf, qry->result->size, 1 , fh);
+	}
+	buf_cleanup(qry->result);
+
+	if (qry->p->out_filename)
+		fclose(fh);
+
+	qry->p->state = STATUS_FREE;
+	qry->retry = 0;
+}
+
 static void print_tls_resp(struct tls_child *qry, bool is_err) {
 
 	bool write_out = FALSE;
 	struct timeval asap = { 0, 1 };
-	FILE *fh;
 	struct tls_state *pqry = qry->p;
 
 	if (qry->p->active > 0)
@@ -507,45 +578,17 @@ static void print_tls_resp(struct tls_child *qry, bool is_err) {
 	if(write_out) {
 		if (qry->p->done) /* call the done function */
 			evtimer_add(&qry->p->done_ev, &asap);
-	}
-
-	if (write_out && (qry->result->size > 0)) {
-		/* end of result only JSON closing brackets from here on */
-		AS("]");  /* resultset : [{}..] */
-
-		AS (",");
-		JD(queries, qry->p->q_serial);
-		JD_NC(success, qry->p->q_success);
-		AS (" }\n");   /* RESULT { } . end of RESULT line */
-
-		if (qry->p->out_filename)
-		{
-			fh= fopen(qry->p->out_filename, "a");
-			if (!fh) {
-				crondlog(LVL8 "unable to append to '%s'",
-						qry->p->out_filename);
-			}
+		if(qry->p->opt_sum) {
+			write_full_res(qry);
+		} else {
+			write_full_res(qry);
 		}
-		else
-			fh = stdout;
-
-		if (fh) {
-			fwrite(qry->result->buf, qry->result->size, 1 , fh);
-		}
-		buf_cleanup(qry->result);
-
-		if (qry->p->out_filename)
-			fclose(fh);
-
-		qry->p->state = STATUS_FREE;
-		qry->retry = 0;
-		asap.tv_usec *= 2;
-		evtimer_add(&pqry->free_inst_ev, &asap);
 	}
 	else {
 		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
 				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	}
+	evtimer_add(&pqry->free_inst_ev, &asap);
 }
 
 int tlsscan_delete (void *st)
@@ -983,7 +1026,8 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->user_agent= "httpget for atlas.ripe.net";
 	pqry->path = "/";
 	pqry->done = done;
-	pqry->opt_all_tests = FALSE;
+	pqry->opt_all_tests = TRUE;
+	pqry->opt_sum = TRUE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
@@ -1037,6 +1081,7 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 		rs->next = qry->p->rsums;
 		qry->p->rsums = rs;
 		qry->result = xzalloc(sizeof(struct buf));
+		qry->rs = rs;
 	}
 	else {
 		qry->result = &pqry->result;
