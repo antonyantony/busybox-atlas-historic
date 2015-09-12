@@ -55,11 +55,9 @@ struct tls_base {
 static void crondlog_aa(const char *ctl, char *fmt, ...);
 
 
-struct result_ip {
-	struct result_ip *next;
-	struct buf err;
-	struct buf result;
-	struct evutil_addrinfo *addr_curr; /* this the key to identify */
+struct rsum {
+	struct rsum *next;
+	struct buf *result;
 };
 
 /* How to keep track of each user tlsscan query aka pqry */
@@ -73,6 +71,7 @@ struct tls_state {
 	/* all children share same result and err structure as parent */
 	struct buf err;
 	struct buf result;
+	struct rsum  *rsums; /* head of linked list on the parent query */
 	struct result_ip *res_head;
 
 	struct evutil_addrinfo *addr;
@@ -352,9 +351,31 @@ static void fmt_ssl_host(struct tls_child *qry, bool is_err)
 	}
 }
 
+static void fmt_ssl_p_result(struct tls_child *qry)
+{
+		int lts =  -1 ; /*  get_timesync(); */ /* AA_FIXME */
+		int fw = get_atlas_fw_version();
+
+		AS("RESULT { ");
+		if(qry->p->str_Atlas != NULL)
+		{
+			JS(id, qry->p->str_Atlas);
+		}
+		JD(fw, fw);
+		JD(dnscount, qry->p->dns_count);
+		JS1(time, %ld, qry->p->start_time.tv_sec);
+		JD(lts,lts); // fix me take lts when I create start time.
+		AS("\"resultset\" : [ {");
+
+}
+
 static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 {
+	if(qry->p->rsums->next == NULL) /* this is the first query */
+		fmt_ssl_p_result(qry);
+
 	if (qry->result->size == 0){
+		AS ("{");
 		fmt_ssl_time(qry);
 		fmt_ssl_host(qry, is_err);
 
@@ -370,12 +391,27 @@ static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 			AS (", ");
 			JS_NC(ciphers, qry->cipher_list);
 		}
+		AS (", \"ciphers\" : [");
+	} 
+	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
+			(qry->tls_incomplete != 0)) {
+		int i;
+		qry->p->q_success++;
+		AS(",");
+		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
+
+
+		if ((qry->is_gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
+			/* this is a successful child. 
+			 * create grand children with algorithm varients 
+			 */
+			ssl_gc_init(qry);
+		}
 	}
 }
 
 static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 {
-	int fw = get_atlas_fw_version();
 
 	/* if it is failed grand child qury do not print anything */
 	if (qry->is_gc && qry->tls_incomplete ){
@@ -387,18 +423,7 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 	}
 
 	if (qry->result->size == 0){
-		int lts =  -1 ; /*  get_timesync(); */ /* AA_FIXME */
-
-		AS("RESULT { ");
-		if(qry->p->str_Atlas != NULL)
-		{
-			JS(id, qry->p->str_Atlas);
-		}
-		JD(fw, fw);
-		JD(dnscount, qry->p->dns_count);
-		JS1(time, %ld, qry->p->start_time.tv_sec);
-		JD(lts,lts); // fix me take lts when I create start time.
-		AS("\"resultset\" : [ {");
+		fmt_ssl_p_result(qry);
 	}
 	else {
 		AS (",{");
@@ -1006,7 +1031,17 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 	pqry->active++;
 	qry->p->q_serial++;
 	qry->serial =  qry->p->q_serial;
-	qry->result = xzalloc(sizeof(struct buf));
+
+	if(qry->p->opt_sum) {
+		struct rsum *rs =  xzalloc(sizeof(struct rsum));
+		rs->next = qry->p->rsums;
+		qry->p->rsums = rs;
+		qry->result = xzalloc(sizeof(struct buf));
+	}
+	else {
+		qry->result = &pqry->result;
+	}
+
 	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
 	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	qry->sslv  = sslv;
