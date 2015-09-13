@@ -372,10 +372,9 @@ static void fmt_ssl_p_result(struct tls_child *qry)
 
 static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 {
-	if((qry->rs != NULL) && (qry->rs->next == NULL)) /* this is the first query */
-		fmt_ssl_p_result(qry);
+	int size = qry->result->size ;
 
-	if (qry->result->size == 0){
+	if (size == 0){
 		AS ("{");
 		fmt_ssl_time(qry);
 		fmt_ssl_host(qry, is_err);
@@ -384,23 +383,25 @@ static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 		if(qry->retry) {
 			JD(retry, qry->retry);
 		}
-
-		fmt_ssl_time(qry);
-		fmt_ssl_host(qry, is_err);
-
-		if (qry->cipher_list != NULL) {
+		if (qry->sslv_str != NULL) {
 			AS (", ");
-			JS_NC(ciphers, qry->cipher_list);
+			JS_NC(version, qry->sslv_str);
 		}
-		AS (", \"ciphers\" : [");
+
 	}
 	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
-			(qry->tls_incomplete != 0)) {
+			(!qry->tls_incomplete)) {
 		int i;
 		qry->p->q_success++;
-		AS(",");
-		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
+		if (size == 0) {
+			AS (", \"ciphers\" : [");
+		} else {
+			AS(" ,");
+		}
 
+		AS ("\"");
+		AS (SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
+		AS ("\"");
 
 		if ((qry->is_gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
 			/* this is a successful child. 
@@ -448,7 +449,7 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 	}
 
 	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
-			(qry->tls_incomplete != 0)) {
+			(qry->tls_incomplete == FALSE)) {
 		int i;
 		qry->p->q_success++;
 		AS(",");
@@ -506,6 +507,7 @@ static void write_sum_res(struct tls_child *qry)
 		for (r = qry->p->rsums; (r != NULL); r = r->next) {
 			fwrite(r->result->buf, r->result->size, 1 , fh);
 		}
+		AS ("] "); /* ciphers [] */
 	}
 	buf_cleanup(qry->result);
 
@@ -904,8 +906,8 @@ static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
 			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	evtimer_del(&qry->timeout_ev);
-	print_tls_resp(qry, FALSE);
 	qry->tls_incomplete = FALSE;
+	print_tls_resp(qry, FALSE);
 	bufferevent_free(qry->bev);
 	qry->bev = NULL;
 }
@@ -1076,6 +1078,12 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 	qry->p->q_serial++;
 	qry->serial =  qry->p->q_serial;
 
+	if (addr_curr == NULL) { /* there was dns error */
+		struct timeval asap = { 0, 0};
+		evtimer_add(&qry->timeout_ev, &asap);
+		return FALSE;
+	}
+
 	if(qry->p->opt_sum) {
 		struct rsum *rs =  xzalloc(sizeof(struct rsum));
 		rs->next = qry->p->rsums;
@@ -1090,12 +1098,6 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
 	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	qry->sslv  = sslv;
-
-	if (addr_curr == NULL) {
-		struct timeval asap = { 0, 0};
-		evtimer_add(&qry->timeout_ev, &asap);
-		return FALSE;
-	}
 
 	qry->tls_incomplete = TRUE;
 	tls_child_start(qry, "ALL:COMPLEMENTOFALL");
@@ -1125,9 +1127,9 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 	for (cur = res; cur != NULL; cur = cur->ai_next) {
 		pqry->dns_count++;
 		if (pqry->opt_all_tests) {
-			tls_child_init(pqry, cur, pqry->opt_ssl_v3);
-			tls_child_init(pqry, cur, pqry->opt_tls_v1);
-			tls_child_init(pqry, cur, pqry->opt_tls_v11);
+			// tls_child_init(pqry, cur, pqry->opt_ssl_v3);
+			// tls_child_init(pqry, cur, pqry->opt_tls_v1);
+			// tls_child_init(pqry, cur, pqry->opt_tls_v11);
 			tls_child_init(pqry, cur, pqry->opt_tls_v12);
 		}
 		else  {
