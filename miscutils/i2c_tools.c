@@ -61,112 +61,14 @@
 
 #include "libbb.h"
 
-/*
- * /dev/i2c-X ioctl commands. The ioctl's parameter is always an unsigned long,
- * except for:
- *    - I2C_FUNCS, takes pointer to an unsigned long
- *    - I2C_RDWR, takes pointer to struct i2c_rdwr_ioctl_data
- *    - I2C_SMBUS, takes pointer to struct i2c_smbus_ioctl_data
- */
+#include <linux/i2c.h>
+#include <linux/i2c-dev.h>
 
-/*
- * NOTE: Slave address is 7 or 10 bits, but 10-bit addresses
- * are not supported due to code brokenness.
- */
+#define I2CDUMP_NUM_REGS		256
 
-/* Use this slave address. */
-#define I2C_SLAVE	0x0703
-/* Use this slave address, even if it is already in use by a driver. */
-#define I2C_SLAVE_FORCE	0x0706
-/* 0 for 7 bit addrs, != 0 for 10 bit. */
-#define I2C_TENBIT	0x0704
-/* Get the adapter functionality mask. */
-#define I2C_FUNCS	0x0705
-/* Combined R/W transfer (one STOP only). */
-#define I2C_RDWR	0x0707
-/* != 0 to use PEC with SMBus. */
-#define I2C_PEC		0x0708
-/* SMBus transfer. */
-#define I2C_SMBUS	0x0720
-
-/* Structure used in the I2C_SMBUS ioctl call. */
-struct i2c_smbus_ioctl_data {
-	uint8_t read_write;
-	uint8_t command;
-	uint32_t size;
-	union i2c_smbus_data *data;
-};
-
-/* Structure used in the I2C_RDWR ioctl call. */
-struct i2c_rdwr_ioctl_data {
-	struct i2c_msg *msgs;	/* Pointers to i2c_msgs. */
-	uint32_t nmsgs;		/* Number of i2c_msgs. */
-};
-
-/* As specified in SMBus standard. */
-#define I2C_SMBUS_BLOCK_MAX		32
-/* Not specified but we use same structure. */
-#define I2C_SMBUS_I2C_BLOCK_MAX		32
-
-/* Data for SMBus Messages. */
-union i2c_smbus_data {
-	uint8_t byte;
-	uint16_t word;
-	/* block[0] is used for length and one more for PEC */
-	uint8_t block[I2C_SMBUS_BLOCK_MAX + 2];
-};
-
-#define I2C_RDRW_IOCTL_MAX_MSGS		42
-#define I2C_MAX_REGS			256
-
-/* Smbus_access read or write markers. */
-#define I2C_SMBUS_READ			1
-#define I2C_SMBUS_WRITE			0
-
-/* SMBus transaction types (size parameter in the below functions). */
-#define I2C_SMBUS_QUICK			0
-#define I2C_SMBUS_BYTE			1
-#define I2C_SMBUS_BYTE_DATA		2
-#define I2C_SMBUS_WORD_DATA		3
-#define I2C_SMBUS_PROC_CALL		4
-#define I2C_SMBUS_BLOCK_DATA		5
-#define I2C_SMBUS_I2C_BLOCK_BROKEN	6
-#define I2C_SMBUS_BLOCK_PROC_CALL	7
-#define I2C_SMBUS_I2C_BLOCK_DATA	8
-
-#define DETECT_MODE_AUTO		0
-#define DETECT_MODE_QUICK		1
-#define DETECT_MODE_READ		2
-
-/* Defines to determine what functionality is present. */
-#define I2C_FUNC_I2C				0x00000001
-#define I2C_FUNC_10BIT_ADDR			0x00000002
-#define I2C_FUNC_PROTOCOL_MANGLING		0x00000004
-#define I2C_FUNC_SMBUS_PEC			0x00000008
-#define I2C_FUNC_SMBUS_BLOCK_PROC_CALL		0x00008000
-#define I2C_FUNC_SMBUS_QUICK			0x00010000
-#define I2C_FUNC_SMBUS_READ_BYTE		0x00020000
-#define I2C_FUNC_SMBUS_WRITE_BYTE		0x00040000
-#define I2C_FUNC_SMBUS_READ_BYTE_DATA		0x00080000
-#define I2C_FUNC_SMBUS_WRITE_BYTE_DATA		0x00100000
-#define I2C_FUNC_SMBUS_READ_WORD_DATA		0x00200000
-#define I2C_FUNC_SMBUS_WRITE_WORD_DATA		0x00400000
-#define I2C_FUNC_SMBUS_PROC_CALL		0x00800000
-#define I2C_FUNC_SMBUS_READ_BLOCK_DATA		0x01000000
-#define I2C_FUNC_SMBUS_WRITE_BLOCK_DATA 	0x02000000
-#define I2C_FUNC_SMBUS_READ_I2C_BLOCK		0x04000000
-#define I2C_FUNC_SMBUS_WRITE_I2C_BLOCK		0x08000000
-
-#define I2C_FUNC_SMBUS_BYTE		(I2C_FUNC_SMBUS_READ_BYTE | \
-					 I2C_FUNC_SMBUS_WRITE_BYTE)
-#define I2C_FUNC_SMBUS_BYTE_DATA	(I2C_FUNC_SMBUS_READ_BYTE_DATA | \
-					 I2C_FUNC_SMBUS_WRITE_BYTE_DATA)
-#define I2C_FUNC_SMBUS_WORD_DATA	(I2C_FUNC_SMBUS_READ_WORD_DATA | \
-					 I2C_FUNC_SMBUS_WRITE_WORD_DATA)
-#define I2C_FUNC_SMBUS_BLOCK_DATA	(I2C_FUNC_SMBUS_READ_BLOCK_DATA | \
-					 I2C_FUNC_SMBUS_WRITE_BLOCK_DATA)
-#define I2C_FUNC_SMBUS_I2C_BLOCK	(I2C_FUNC_SMBUS_READ_I2C_BLOCK | \
-					 I2C_FUNC_SMBUS_WRITE_I2C_BLOCK)
+#define I2CDETECT_MODE_AUTO		0
+#define I2CDETECT_MODE_QUICK		1
+#define I2CDETECT_MODE_READ		2
 
 /*
  * This is needed for ioctl_or_perror_and_die() since it only accepts pointers.
@@ -818,14 +720,14 @@ int i2cset_main(int argc, char **argv)
 #if ENABLE_I2CDUMP
 static int read_block_data(int buf_fd, int mode, int *block)
 {
-	uint8_t cblock[I2C_SMBUS_BLOCK_MAX + I2C_MAX_REGS];
+	uint8_t cblock[I2C_SMBUS_BLOCK_MAX + I2CDUMP_NUM_REGS];
 	int res, blen = 0, tmp, i;
 
 	if (mode == I2C_SMBUS_BLOCK_DATA || mode == I2C_SMBUS_I2C_BLOCK_DATA) {
 		res = i2c_smbus_read_block_data(buf_fd, 0, cblock);
 		blen = res;
 	} else {
-		for (res = 0; res < I2C_MAX_REGS; res += tmp) {
+		for (res = 0; res < I2CDUMP_NUM_REGS; res += tmp) {
 			tmp = i2c_smbus_read_i2c_block_data(
 					buf_fd, res, I2C_SMBUS_BLOCK_MAX,
 					cblock + res);
@@ -834,14 +736,14 @@ static int read_block_data(int buf_fd, int mode, int *block)
 			}
 		}
 
-		if (res >= I2C_MAX_REGS)
-			res = I2C_MAX_REGS;
+		if (res >= I2CDUMP_NUM_REGS)
+			res = I2CDUMP_NUM_REGS;
 
 		for (i = 0; i < res; i++)
 			block[i] = cblock[i];
 
 		if (mode != I2C_SMBUS_BLOCK_DATA)
-			for (i = res; i < I2C_MAX_REGS; i++)
+			for (i = res; i < I2CDUMP_NUM_REGS; i++)
 				block[i] = -1;
 	}
 
@@ -857,7 +759,7 @@ static void dump_data(int bus_fd, int mode, unsigned first,
 	printf("     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f"
 	       "    0123456789abcdef\n");
 
-	for (i = 0; i < I2C_MAX_REGS; i += 0x10) {
+	for (i = 0; i < I2CDUMP_NUM_REGS; i += 0x10) {
 		if (mode == I2C_SMBUS_BLOCK_DATA && i >= blen)
 			break;
 		if (i/16 < first/16)
@@ -1298,7 +1200,7 @@ int i2cdetect_main(int argc UNUSED_PARAM, char **argv)
 			      opt_F = (1 << 4), opt_l = (1 << 5);
 	const char *const optstr = "yaqrFl";
 
-	int fd, bus_num, i, j, mode = DETECT_MODE_AUTO, status;
+	int fd, bus_num, i, j, mode = I2CDETECT_MODE_AUTO, status;
 	unsigned first = 0x03, last = 0x77, opts;
 	unsigned long funcs;
 
@@ -1329,9 +1231,9 @@ int i2cdetect_main(int argc UNUSED_PARAM, char **argv)
 	}
 
 	if (opts & opt_r)
-		mode = DETECT_MODE_READ;
+		mode = I2CDETECT_MODE_READ;
 	else if (opts & opt_q)
-		mode = DETECT_MODE_QUICK;
+		mode = I2CDETECT_MODE_QUICK;
 
 	if (opts & opt_a) {
 		first = 0x00;
@@ -1348,14 +1250,14 @@ int i2cdetect_main(int argc UNUSED_PARAM, char **argv)
 	if (!(funcs & (I2C_FUNC_SMBUS_QUICK | I2C_FUNC_SMBUS_READ_BYTE))) {
 		no_support("detection commands");
 	} else
-	if (mode == DETECT_MODE_QUICK && !(funcs & I2C_FUNC_SMBUS_QUICK)) {
+	if (mode == I2CDETECT_MODE_QUICK && !(funcs & I2C_FUNC_SMBUS_QUICK)) {
 		no_support("SMBus Quick Write command");
 	} else
-	if (mode == DETECT_MODE_READ && !(funcs & I2C_FUNC_SMBUS_READ_BYTE)) {
+	if (mode == I2CDETECT_MODE_READ && !(funcs & I2C_FUNC_SMBUS_READ_BYTE)) {
 		no_support("SMBus Receive Byte command");
 	}
 
-	if (mode == DETECT_MODE_AUTO) {
+	if (mode == I2CDETECT_MODE_AUTO) {
 		if (!(funcs & I2C_FUNC_SMBUS_QUICK))
 			will_skip("SMBus Quick Write");
 		if (!(funcs & I2C_FUNC_SMBUS_READ_BYTE))
@@ -1371,19 +1273,19 @@ int i2cdetect_main(int argc UNUSED_PARAM, char **argv)
 		for(j = 0; j < 16; j++) {
 			fflush_all();
 
-			if (mode == DETECT_MODE_AUTO) {
+			if (mode == I2CDETECT_MODE_AUTO) {
 				if ((i+j >= 0x30 && i+j <= 0x37) ||
 				    (i+j >= 0x50 && i+j <= 0x5F))
-					mode = DETECT_MODE_READ;
+					mode = I2CDETECT_MODE_READ;
 				else
-					mode = DETECT_MODE_QUICK;
+					mode = I2CDETECT_MODE_QUICK;
 			}
 
 			/* Skip unwanted addresses. */
 			if (i+j < first
 			 || i+j > last
-			 || (mode == DETECT_MODE_READ && !(funcs & I2C_FUNC_SMBUS_READ_BYTE))
-			 || (mode == DETECT_MODE_QUICK && !(funcs & I2C_FUNC_SMBUS_QUICK)))
+			 || (mode == I2CDETECT_MODE_READ && !(funcs & I2C_FUNC_SMBUS_READ_BYTE))
+			 || (mode == I2CDETECT_MODE_QUICK && !(funcs & I2C_FUNC_SMBUS_QUICK)))
 			{
 				printf("   ");
 				continue;
@@ -1401,14 +1303,14 @@ int i2cdetect_main(int argc UNUSED_PARAM, char **argv)
 			}
 
 			switch (mode) {
-			case DETECT_MODE_READ:
+			case I2CDETECT_MODE_READ:
 				/*
 				 * This is known to lock SMBus on various
 				 * write-only chips (mainly clock chips).
 				 */
 				status = i2c_smbus_read_byte(fd);
 				break;
-			default: /* DETECT_MODE_QUICK: */
+			default: /* I2CDETECT_MODE_QUICK: */
 				/*
 				 * This is known to corrupt the Atmel
 				 * AT24RF08 EEPROM.
