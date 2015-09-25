@@ -1400,14 +1400,13 @@
      "\n	-f	Ignore case" \
      "\n	-g	General numerical sort" \
      "\n	-i	Ignore unprintable characters" \
-     "\n	-k	Sort key" \
      "\n	-M	Sort month" \
 	) \
      "\n	-n	Sort numbers" \
 	IF_FEATURE_SORT_BIG( \
      "\n	-o	Output to file" \
-     "\n	-k	Sort by key" \
-     "\n	-t CHAR	Key separator" \
+     "\n	-t CHAR	Field separator" \
+     "\n	-k N[,M] Sort by Nth field" \
 	) \
      "\n	-r	Reverse sort order" \
 	IF_FEATURE_SORT_BIG( \
@@ -2499,6 +2498,7 @@
      "\n	-D		Don't assign a password" \
      "\n	-H		Don't create home directory" \
      "\n	-u UID		User id" \
+     "\n	-k SKEL		Skeleton directory (/etc/skel)" \
 
 #define chpasswd_trivial_usage \
 	IF_LONG_OPTS("[--md5|--encrypted]") IF_NOT_LONG_OPTS("[-m|-e]") \
