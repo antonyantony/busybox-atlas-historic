@@ -29,7 +29,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
-#include "openssl_hostname_validation.h"
+#include "tls_hostname_validation.h"
 
 #define SAFE_PREFIX ATLAS_DATA_NEW
 
@@ -827,8 +827,8 @@ static bool ssl_arg_validate (int argc, char *argv[], struct ssl_state *pqry )
 	if (pqry->opt_all_tests ) {
 		// pqry->opt_ssl_v3 = SSL3_VERSION;
 		// pqry->opt_tls_v1 =  TLS1_VERSION;
-		 pqry->opt_tls_v11 = TLS1_1_VERSION;
-		//pqry-> opt_tls_v12 = TLS1_2_VERSION;
+		// pqry->opt_tls_v11 = TLS1_1_VERSION;
+		pqry->opt_tls_v12 = TLS1_2_VERSION;
 	} 
 	return TRUE;
 }
@@ -868,7 +868,7 @@ static struct ssl_state * sslscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->path = "/";
 	pqry->result = xzalloc(sizeof(struct buf));
 	pqry->done = done;
-	pqry->opt_all_tests = TRUE;
+	pqry->opt_all_tests = FALSE;
 	pqry->timeout_tv.tv_sec = 5;
 
 	if (done != NULL)
