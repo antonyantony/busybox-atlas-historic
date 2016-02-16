@@ -550,7 +550,7 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 			JS(id, qry->p->str_Atlas);
 		}
 		JD(fw, fw);
-		JD(dnscout, qry->p->dns_count);
+		JD(dnscount, qry->p->dns_count);
 		JS1(time, %ld, qry->p->start_time.tv_sec);
 		JD(lts,lts); // fix me take lts when I create start time.
 		AS("\"resultset\" : [ {");
@@ -911,7 +911,7 @@ static bool ssl_child_init(struct ssl_state *pqry, struct evutil_addrinfo *addr_
 	qry->result = pqry->result;
 	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
-	evtimer_assign(&qry->free_pqry_ev, EventBase, free_qry_inst_cb, qry);
+	evtimer_assign(&qry->free_pqry_ev, EventBase, free_qry_inst_cb, qry->p);
 	qry->sslv  = sslv;
 	qry->ssl_incomplete = TRUE;
 	ssl_child_start(qry, "ALL:COMPLEMENTOFALL");
