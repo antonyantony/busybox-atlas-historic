@@ -256,6 +256,8 @@ static void timeout_cb(int unused  UNUSED_PARAM, const short event
 	}
 
 	print_ssl_resp(qry);
+	bufferevent_free(qry->bev);
+        qry->bev = NULL;
 }
 
 /* Initialize a struct timeval by converting milliseconds */
@@ -463,13 +465,14 @@ static bool ssl_child_start (struct ssl_child *qry, const char * cipher_list)
 				qry->addr_curr->ai_addr,
 				qry->addr_curr->ai_addrlen)) {
 		crondlog_aa(LVL8, "ERROR bufferevent_socket_connect to %s %s" 
-				"ctive = %d %s %s - %s", qry->addrstr, qry->p->host, 
+				"active = %d %s %s - %s", qry->addrstr, qry->p->host, 
 				qry->p->active, qry->sslv_str, qry->cipher_list,
 				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR())
 				);
 
 		// warnx("could not connect to %s : %s", qry->p->host, evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
-		bufferevent_free(qry->bev);
+		if (qry->bev != NULL)
+			bufferevent_free(qry->bev);
 		qry->bev = NULL;
 		return TRUE;
 	}
@@ -516,8 +519,13 @@ static void ssl_gc_init(struct ssl_child *qry)
 		gcqry->sslv  = qry->sslv;
 		crondlog_aa(LVL7, "grand child %s %s %s active = %d %s %s",  __func__,
 				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, p);
-		ssl_child_start(gcqry, p);
-		gcqry->gc = TRUE;
+		if (ssl_child_start(gcqry, p))
+		{
+			struct timeval asap = { 0, 0};
+			evtimer_add(&qry->free_child_ev, &asap);
+		} else {
+			gcqry->gc = TRUE;
+		}
 	}
 }	
 
@@ -638,7 +646,7 @@ void fmt_ssl_resp(struct ssl_child *qry) {
 void print_ssl_resp(struct ssl_child *qry) {
 
 	bool write_out = FALSE;
-	struct timeval asap = { 0, 10 };
+	struct timeval asap = { 0, 0 };
 	FILE *fh;
 	struct ssl_state *pqry = qry->p;
 
@@ -646,6 +654,7 @@ void print_ssl_resp(struct ssl_child *qry) {
 	evtimer_add(&qry->free_child_ev, &asap);
 
 	if (qry->p->active < 1) {
+		crondlog_aa(LVL5, "waiting for no more %d queries", qry->p->active);
 		write_out = TRUE;
 	}
 	else {
@@ -696,7 +705,6 @@ void print_ssl_resp(struct ssl_child *qry) {
 		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
 				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	}
-
 }
 
 
@@ -713,6 +721,8 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"connect\" : \"connect failed\"", qry->err.size ? ", " : "");
 		buf_add(&qry->err, line, strlen(line));
 		print_ssl_resp(qry);
+		bufferevent_free(qry->bev);
+		qry->bev = NULL;
 		return;
 	}
 
@@ -828,7 +838,7 @@ static bool ssl_arg_validate (int argc, char *argv[], struct ssl_state *pqry )
 		// pqry->opt_ssl_v3 = SSL3_VERSION;
 		// pqry->opt_tls_v1 =  TLS1_VERSION;
 		// pqry->opt_tls_v11 = TLS1_1_VERSION;
-		pqry->opt_tls_v12 = TLS1_2_VERSION;
+		// pqry->opt_tls_v12 = TLS1_2_VERSION;
 	} 
 	return TRUE;
 }
