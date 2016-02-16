@@ -42,7 +42,7 @@ SOFTWARE.
 #include <openssl/x509v3.h>
 #include <openssl/ssl.h>
 
-#include "openssl_hostname_validation.h"
+#include "tls_hostname_validation.h"
 #include "hostcheck.h"
 
 #define HOSTNAME_MAX_SIZE 255
