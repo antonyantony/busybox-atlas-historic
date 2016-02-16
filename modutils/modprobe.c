@@ -150,19 +150,6 @@ static const char modprobe_longopts[] ALIGN1 =
 #define MODULE_FLAG_FOUND_IN_MODDEP     0x0004
 #define MODULE_FLAG_BLACKLISTED         0x0008
 
-struct module_entry { /* I'll call it ME. */
-	unsigned flags;
-	char *modname; /* stripped of /path/, .ext and s/-/_/g */
-	const char *probed_name; /* verbatim as seen on cmdline */
-	char *options; /* options from config files */
-	llist_t *realnames; /* strings. if this module is an alias, */
-	/* real module name is one of these. */
-//Can there really be more than one? Example from real kernel?
-	llist_t *deps; /* strings. modules we depend on */
-};
-
-#define DB_HASH_SIZE 256
-
 struct globals {
 	llist_t *probes; /* MEs of module(s) requested on cmdline */
 	char *cmdline_mopts; /* module options from cmdline */
@@ -170,7 +157,7 @@ struct globals {
 	/* bool. "Did we have 'symbol:FOO' requested on cmdline?" */
 	smallint need_symbols;
 	struct utsname uts;
-	llist_t *db[DB_HASH_SIZE]; /* MEs of all modules ever seen (caching for speed) */
+	module_db db;
 } FIX_ALIASING;
 #define G (*ptr_to_globals)
 #define INIT_G() do { \
@@ -195,51 +182,9 @@ static char *gather_options_str(char *opts, const char *append)
 	return opts;
 }
 
-/* These three functions called many times, optimizing for speed.
- * Users reported minute-long delays when they runn iptables repeatedly
- * (iptables use modprobe to install needed kernel modules).
- */
-static struct module_entry *helper_get_module(const char *module, int create)
+static struct module_entry *get_or_add_modentry(const char *module)
 {
-	char modname[MODULE_NAME_LEN];
-	struct module_entry *e;
-	llist_t *l;
-	unsigned i;
-	unsigned hash;
-
-	filename2modname(module, modname);
-
-	hash = 0;
-	for (i = 0; modname[i]; i++)
-		hash = ((hash << 5) + hash) + modname[i];
-	hash %= DB_HASH_SIZE;
-
-	for (l = G.db[hash]; l; l = l->link) {
-		e = (struct module_entry *) l->data;
-		if (strcmp(e->modname, modname) == 0)
-			return e;
-	}
-	if (!create)
-		return NULL;
-
-	e = xzalloc(sizeof(*e));
-	e->modname = xstrdup(modname);
-	llist_add_to(&G.db[hash], e);
-
-	return e;
-}
-static ALWAYS_INLINE struct module_entry *get_or_add_modentry(const char *module)
-{
-	return helper_get_module(module, 1);
-}
-/* So far this function always gets a module pathname, never an alias name.
- * The crucial difference is that pathname needs dirname stripping,
- * while alias name must NOT do it!
- * Testcase where dirname stripping is likely to go wrong: "modprobe devname:snd/timer"
- */
-static ALWAYS_INLINE struct module_entry *get_modentry(const char *pathname)
-{
-	return helper_get_module(bb_get_last_path_component_nostrip(pathname), 0);
+	return moddb_get_or_create(&G.db, module);
 }
 
 static void add_probe(const char *name)
@@ -275,8 +220,16 @@ static int FAST_FUNC config_file_action(const char *filename,
 	parser_t *p;
 	struct module_entry *m;
 	int rc = TRUE;
+	const char *base, *ext;
 
-	if (bb_basename(filename)[0] == '.')
+	/* Skip files that begin with a ".". */
+	base = bb_basename(filename);
+	if (base[0] == '.')
+		goto error;
+
+	/* Skip files that do not end with a ".conf". */
+	ext = strrchr(base, '.');
+	if (ext == NULL || strcmp(ext + 1, "conf"))
 		goto error;
 
 	p = config_open2(filename, fopen_for_read);
@@ -348,6 +301,38 @@ static const char *humanly_readable_name(struct module_entry *m)
 	return m->probed_name ? m->probed_name : m->modname;
 }
 
+/* Like strsep(&stringp, "\n\t ") but quoted text goes to single token
+ * even if it contains whitespace.
+ */
+static char *strsep_quotes(char **stringp)
+{
+	char *s, *start = *stringp;
+
+	if (!start)
+		return NULL;
+
+	for (s = start; ; s++) {
+		switch (*s) {
+		case '"':
+			s = strchrnul(s + 1, '"'); /* find trailing quote */
+			if (*s != '\0')
+				s++; /* skip trailing quote */
+			/* fall through */
+		case '\0':
+		case '\n':
+		case '\t':
+		case ' ':
+			if (*s != '\0') {
+				*s = '\0';
+				*stringp = s + 1;
+			} else {
+				*stringp = NULL;
+			}
+			return start;
+		}
+	}
+}
+
 static char *parse_and_add_kcmdline_module_options(char *options, const char *modulename)
 {
 	char *kcmdline_buf;
@@ -359,7 +344,7 @@ static char *parse_and_add_kcmdline_module_options(char *options, const char *mo
 		return options;
 
 	kcmdline = kcmdline_buf;
-	while ((kptr = strsep(&kcmdline, "\n\t ")) != NULL) {
+	while ((kptr = strsep_quotes(&kcmdline)) != NULL) {
 		char *after_modulename = is_prefixed_with(kptr, modulename);
 		if (!after_modulename || *after_modulename != '.')
 			continue;
@@ -429,9 +414,8 @@ static int do_modprobe(struct module_entry *m)
 				rc = bb_delete_module(m2->modname, O_EXCL);
 				if (rc) {
 					if (first) {
-						bb_error_msg("can't unload module %s: %s",
-							humanly_readable_name(m2),
-							moderror(rc));
+						bb_perror_msg("can't unload module '%s'",
+							humanly_readable_name(m2));
 						break;
 					}
 				} else {
@@ -505,7 +489,7 @@ static void load_modules_dep(void)
 			continue;
 		*colon = '\0';
 
-		m = get_modentry(tokens[0]);
+		m = moddb_get(&G.db, bb_get_last_path_component_nostrip(tokens[0]));
 		if (m == NULL)
 			continue;
 
@@ -590,7 +574,7 @@ int modprobe_main(int argc UNUSED_PARAM, char **argv)
 			 * autoclean will be removed".
 			 */
 			if (bb_delete_module(NULL, O_NONBLOCK | O_EXCL) != 0)
-				bb_perror_msg_and_die("rmmod");
+				bb_perror_nomsg_and_die();
 		}
 		return EXIT_SUCCESS;
 	}
@@ -665,6 +649,9 @@ int modprobe_main(int argc UNUSED_PARAM, char **argv)
 			free(realname);
 		} while (me->realnames != NULL);
 	}
+
+	if (ENABLE_FEATURE_CLEAN_UP)
+		moddb_free(&G.db);
 
 	return (rc != 0);
 }

@@ -113,7 +113,7 @@ typedef struct sed_cmd_s {
 	int end_line;           /* 'sed 1,3p' 0 == one line only. -1 = last line ($). -2-N = +N */
 	int end_line_orig;
 
-	FILE *sw_file;          /* File (sw) command writes to, -1 for none. */
+	FILE *sw_file;          /* File (sw) command writes to, NULL for none. */
 	char *string;           /* Data string for (saicytb) commands. */
 
 	unsigned which_match;   /* (s) Which match to replace (0 for all) */
@@ -162,10 +162,8 @@ struct globals {
 	} pipeline;
 } FIX_ALIASING;
 #define G (*(struct globals*)&bb_common_bufsiz1)
-struct BUG_G_too_big {
-	char BUG_G_too_big[sizeof(G) <= COMMON_BUFSIZE ? 1 : -1];
-};
 #define INIT_G() do { \
+	BUILD_BUG_ON(sizeof(G) > COMMON_BUFSIZE); \
 	G.sed_cmd_tail = &G.sed_cmd_head; \
 } while (0)
 
@@ -181,7 +179,7 @@ static void sed_free_and_close_stuff(void)
 		sed_cmd_t *sed_cmd_next = sed_cmd->next;
 
 		if (sed_cmd->sw_file)
-			xprint_and_close_file(sed_cmd->sw_file);
+			fclose(sed_cmd->sw_file);
 
 		if (sed_cmd->beg_match) {
 			regfree(sed_cmd->beg_match);
@@ -428,8 +426,11 @@ static int parse_subst_cmd(sed_cmd_t *sed_cmd, const char *substr)
 		/* Write to file */
 		case 'w':
 		{
-			char *temp;
-			idx += parse_file_cmd(/*sed_cmd,*/ substr+idx, &temp);
+			char *fname;
+			idx += parse_file_cmd(/*sed_cmd,*/ substr+idx+1, &fname);
+			sed_cmd->sw_file = xfopen_for_write(fname);
+			sed_cmd->sw_last_char = '\n';
+			free(fname);
 			break;
 		}
 		/* Ignore case (gnu exension) */
@@ -501,9 +502,11 @@ static const char *parse_cmd_args(sed_cmd_t *sed_cmd, const char *cmdstr)
 		IDX_rbrace,
 		IDX_nul
 	};
-	struct chk { char chk[sizeof(cmd_letters)-1 == IDX_nul ? 1 : -1]; };
+	unsigned idx;
 
-	unsigned idx = strchrnul(cmd_letters, sed_cmd->cmd) - cmd_letters;
+	BUILD_BUG_ON(sizeof(cmd_letters)-1 != IDX_nul);
+
+	idx = strchrnul(cmd_letters, sed_cmd->cmd) - cmd_letters;
 
 	/* handle (s)ubstitution command */
 	if (idx == IDX_s) {

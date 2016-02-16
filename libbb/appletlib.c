@@ -437,7 +437,7 @@ static void parse_config_file(void)
 						goto pe_label;
 					}
 					*e = ':'; /* get_uidgid needs USER:GROUP syntax */
-					if (get_uidgid(&sct->m_ugid, s, /*allow_numeric:*/ 1) == 0) {
+					if (get_uidgid(&sct->m_ugid, s) == 0) {
 						errmsg = "unknown user/group";
 						goto pe_label;
 					}
@@ -623,7 +623,7 @@ static int busybox_main(char **argv)
 		output_width = 80;
 		if (ENABLE_FEATURE_AUTOWIDTH) {
 			/* Obtain the terminal width */
-			get_terminal_width_height(0, &output_width, NULL);
+			output_width = get_terminal_width(2);
 		}
 
 		dup2(1, 2);
@@ -641,10 +641,19 @@ static int busybox_main(char **argv)
 			)
 			"   or: function [arguments]...\n"
 			"\n"
+			IF_NOT_FEATURE_SH_STANDALONE(
 			"\tBusyBox is a multi-call binary that combines many common Unix\n"
 			"\tutilities into a single executable.  Most people will create a\n"
 			"\tlink to busybox for each function they wish to use and BusyBox\n"
 			"\twill act like whatever it was invoked as.\n"
+			)
+			IF_FEATURE_SH_STANDALONE(
+			"\tBusyBox is a multi-call binary that combines many common Unix\n"
+			"\tutilities into a single executable.  The shell in this build\n"
+			"\tis configured to run built-in utilities without $PATH search.\n"
+			"\tYou don't need to install a link to busybox for each utility.\n"
+			"\tTo run external program, use full path (/sbin/ip instead of ip).\n"
+			)
 			"\n"
 			"Currently defined functions:\n"
 		);

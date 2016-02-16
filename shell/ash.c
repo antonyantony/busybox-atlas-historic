@@ -37,7 +37,6 @@
 
 #define JOBS ENABLE_ASH_JOB_CONTROL
 
-#include <paths.h>
 #include <setjmp.h>
 #include <fnmatch.h>
 #include <sys/times.h>
@@ -537,11 +536,12 @@ flush_stdout_stderr(void)
 	INT_ON;
 }
 
+/* Was called outcslow(c,FILE*), but c was always '\n' */
 static void
-outcslow(int c, FILE *dest)
+newline_and_flush(FILE *dest)
 {
 	INT_OFF;
-	putc(c, dest);
+	putc('\n', dest);
 	fflush(dest);
 	INT_ON;
 }
@@ -1202,7 +1202,7 @@ ash_vmsg(const char *msg, va_list ap)
 			fprintf(stderr, "line %d: ", startlinno);
 	}
 	vfprintf(stderr, msg, ap);
-	outcslow('\n', stderr);
+	newline_and_flush(stderr);
 }
 
 /*
@@ -2555,7 +2555,7 @@ updatepwd(const char *dir)
 			new = stack_putstr(p, new);
 			USTPUTC('/', new);
 		}
-		p = strtok(0, "/");
+		p = strtok(NULL, "/");
 	}
 	if (new > lim)
 		STUNPUTC(new);
@@ -3336,6 +3336,7 @@ unaliascmd(int argc UNUSED_PARAM, char **argv UNUSED_PARAM)
 #define SHOW_ONLY_PGID  0x01    /* show only pgid (jobs -p) */
 #define SHOW_PIDS       0x02    /* show individual pids, not just one line per job */
 #define SHOW_CHANGED    0x04    /* only jobs whose state has changed */
+#define SHOW_STDERR     0x08    /* print to stderr (else stdout) */
 
 /*
  * A job structure contains information about a job.  A job is either a
@@ -3850,7 +3851,7 @@ showpipe(struct job *jp /*, FILE *out*/)
 	psend = jp->ps + jp->nprocs;
 	for (ps = jp->ps + 1; ps < psend; ps++)
 		printf(" | %s", ps->ps_cmd);
-	outcslow('\n', stdout);
+	newline_and_flush(stdout);
 	flush_stdout_stderr();
 }
 
@@ -3910,39 +3911,33 @@ fg_bgcmd(int argc UNUSED_PARAM, char **argv)
 #endif
 
 static int
-sprint_status(char *s, int status, int sigonly)
+sprint_status48(char *s, int status, int sigonly)
 {
 	int col;
 	int st;
 
 	col = 0;
 	if (!WIFEXITED(status)) {
-#if JOBS
-		if (WIFSTOPPED(status))
+		if (JOBS && WIFSTOPPED(status))
 			st = WSTOPSIG(status);
 		else
-#endif
 			st = WTERMSIG(status);
 		if (sigonly) {
 			if (st == SIGINT || st == SIGPIPE)
 				goto out;
-#if JOBS
-			if (WIFSTOPPED(status))
+			if (JOBS && WIFSTOPPED(status))
 				goto out;
-#endif
 		}
 		st &= 0x7f;
 //TODO: use bbox's get_signame? strsignal adds ~600 bytes to text+rodata
 		col = fmtstr(s, 32, strsignal(st));
 		if (WCOREDUMP(status)) {
-			col += fmtstr(s + col, 16, " (core dumped)");
+			strcpy(s + col, " (core dumped)");
+			col += sizeof(" (core dumped)")-1;
 		}
 	} else if (!sigonly) {
 		st = WEXITSTATUS(status);
-		if (st)
-			col = fmtstr(s, 16, "Done(%d)", st);
-		else
-			col = fmtstr(s, 16, "Done");
+		col = fmtstr(s, 16, (st ? "Done(%d)" : "Done"), st);
 	}
  out:
 	return col;
@@ -3955,7 +3950,6 @@ dowait(int wait_flags, struct job *job)
 	int status;
 	struct job *jp;
 	struct job *thisjob;
-	int state;
 
 	TRACE(("dowait(0x%x) called\n", wait_flags));
 
@@ -3973,11 +3967,12 @@ dowait(int wait_flags, struct job *job)
 	INT_OFF;
 	thisjob = NULL;
 	for (jp = curjob; jp; jp = jp->prev_job) {
+		int jobstate;
 		struct procstat *ps;
 		struct procstat *psend;
 		if (jp->state == JOBDONE)
 			continue;
-		state = JOBDONE;
+		jobstate = JOBDONE;
 		ps = jp->ps;
 		psend = ps + jp->nprocs;
 		do {
@@ -3989,41 +3984,41 @@ dowait(int wait_flags, struct job *job)
 				thisjob = jp;
 			}
 			if (ps->ps_status == -1)
-				state = JOBRUNNING;
+				jobstate = JOBRUNNING;
 #if JOBS
-			if (state == JOBRUNNING)
+			if (jobstate == JOBRUNNING)
 				continue;
 			if (WIFSTOPPED(ps->ps_status)) {
 				jp->stopstatus = ps->ps_status;
-				state = JOBSTOPPED;
+				jobstate = JOBSTOPPED;
 			}
 #endif
 		} while (++ps < psend);
-		if (thisjob)
-			goto gotjob;
-	}
+		if (!thisjob)
+			continue;
+
+		/* Found the job where one of its processes changed its state.
+		 * Is there at least one live and running process in this job? */
+		if (jobstate != JOBRUNNING) {
+			/* No. All live processes in the job are stopped
+			 * (JOBSTOPPED) or there are no live processes (JOBDONE)
+			 */
+			thisjob->changed = 1;
+			if (thisjob->state != jobstate) {
+				TRACE(("Job %d: changing state from %d to %d\n",
+					jobno(thisjob), thisjob->state, jobstate));
+				thisjob->state = jobstate;
 #if JOBS
-	if (!WIFSTOPPED(status))
+				if (jobstate == JOBSTOPPED)
+					set_curjob(thisjob, CUR_STOPPED);
 #endif
-		jobless--;
-	goto out;
-
- gotjob:
-	if (state != JOBRUNNING) {
-		thisjob->changed = 1;
-
-		if (thisjob->state != state) {
-			TRACE(("Job %d: changing state from %d to %d\n",
-				jobno(thisjob), thisjob->state, state));
-			thisjob->state = state;
-#if JOBS
-			if (state == JOBSTOPPED) {
-				set_curjob(thisjob, CUR_STOPPED);
 			}
-#endif
 		}
+		goto out;
 	}
-
+	/* The process wasn't found in job list */
+	if (JOBS && !WIFSTOPPED(status))
+		jobless--;
  out:
 	INT_ON;
 
@@ -4031,7 +4026,7 @@ dowait(int wait_flags, struct job *job)
 		char s[48 + 1];
 		int len;
 
-		len = sprint_status(s, status, 1);
+		len = sprint_status48(s, status, 1);
 		if (len) {
 			s[len] = '\n';
 			s[len + 1] = '\0';
@@ -4052,13 +4047,14 @@ blocking_wait_with_raise_on_sig(void)
 
 #if JOBS
 static void
-showjob(FILE *out, struct job *jp, int mode)
+showjob(struct job *jp, int mode)
 {
 	struct procstat *ps;
 	struct procstat *psend;
 	int col;
 	int indent_col;
-	char s[80];
+	char s[16 + 16 + 48];
+	FILE *out = (mode & SHOW_STDERR ? stderr : stdout);
 
 	ps = jp->ps;
 
@@ -4088,7 +4084,7 @@ showjob(FILE *out, struct job *jp, int mode)
 		int status = psend[-1].ps_status;
 		if (jp->state == JOBSTOPPED)
 			status = jp->stopstatus;
-		col += sprint_status(s + col, status, 0);
+		col += sprint_status48(s + col, status, 0);
 	}
 	/* By now, "[JOBID]*  [maybe PID] STATUS" is printed */
 
@@ -4115,7 +4111,7 @@ showjob(FILE *out, struct job *jp, int mode)
 				ps->ps_cmd
 		);
 	} while (++ps != psend);
-	outcslow('\n', out);
+	newline_and_flush(out);
 
 	jp->changed = 0;
 
@@ -4130,7 +4126,7 @@ showjob(FILE *out, struct job *jp, int mode)
  * statuses have changed since the last call to showjobs.
  */
 static void
-showjobs(FILE *out, int mode)
+showjobs(int mode)
 {
 	struct job *jp;
 
@@ -4142,7 +4138,7 @@ showjobs(FILE *out, int mode)
 
 	for (jp = curjob; jp; jp = jp->prev_job) {
 		if (!(mode & SHOW_CHANGED) || jp->changed) {
-			showjob(out, jp, mode);
+			showjob(jp, mode);
 		}
 	}
 }
@@ -4163,10 +4159,10 @@ jobscmd(int argc UNUSED_PARAM, char **argv)
 	argv = argptr;
 	if (*argv) {
 		do
-			showjob(stdout, getjob(*argv, 0), mode);
+			showjob(getjob(*argv, 0), mode);
 		while (*++argv);
 	} else {
-		showjobs(stdout, mode);
+		showjobs(mode);
 	}
 
 	return 0;
@@ -5412,7 +5408,7 @@ popredir(int drop, int restore)
 	struct redirtab *rp;
 	int i;
 
-	if (--g_nullredirs >= 0)
+	if (--g_nullredirs >= 0 || redirlist == NULL)
 		return;
 	INT_OFF;
 	rp = redirlist;
@@ -5572,8 +5568,8 @@ cvtnum(arith_t num)
 {
 	int len;
 
-	expdest = makestrspace(32, expdest);
-	len = fmtstr(expdest, 32, ARITH_FMT, num);
+	expdest = makestrspace(sizeof(arith_t)*3 + 2, expdest);
+	len = fmtstr(expdest, sizeof(arith_t)*3 + 2, ARITH_FMT, num);
 	STADJUST(len, expdest);
 	return len;
 }
@@ -6992,10 +6988,11 @@ expmeta(char *expdir, char *enddir, char *name)
 	struct dirent *dp;
 	int atend;
 	int matchdot;
+	int esc;
 
 	metaflag = 0;
 	start = name;
-	for (p = name; *p; p++) {
+	for (p = name; esc = 0, *p; p += esc + 1) {
 		if (*p == '*' || *p == '?')
 			metaflag = 1;
 		else if (*p == '[') {
@@ -7012,15 +7009,16 @@ expmeta(char *expdir, char *enddir, char *name)
 					break;
 				}
 			}
-		} else if (*p == '\\')
-			p++;
-		else if (*p == '/') {
-			if (metaflag)
-				goto out;
-			start = p + 1;
+		} else {
+			if (*p == '\\')
+				esc++;
+			if (p[esc] == '/') {
+				if (metaflag)
+					break;
+				start = p + esc + 1;
+			}
 		}
 	}
- out:
 	if (metaflag == 0) {    /* we've reached the end of the file name */
 		if (enddir != expdir)
 			metaflag++;
@@ -7060,7 +7058,8 @@ expmeta(char *expdir, char *enddir, char *name)
 		atend = 1;
 	} else {
 		atend = 0;
-		*endname++ = '\0';
+		*endname = '\0';
+		endname += esc + 1;
 	}
 	matchdot = 0;
 	p = start;
@@ -7085,7 +7084,7 @@ expmeta(char *expdir, char *enddir, char *name)
 	}
 	closedir(dirp);
 	if (!atend)
-		endname[-1] = '/';
+		endname[-esc - 1] = esc ? '\\' : '/';
 }
 
 static struct strlist *
@@ -7726,36 +7725,40 @@ changepath(const char *new)
 	clearcmdentry(firstchange);
 	builtinloc = idx_bltin;
 }
-
-#define TEOF 0
-#define TNL 1
-#define TREDIR 2
-#define TWORD 3
-#define TSEMI 4
-#define TBACKGND 5
-#define TAND 6
-#define TOR 7
-#define TPIPE 8
-#define TLP 9
-#define TRP 10
-#define TENDCASE 11
-#define TENDBQUOTE 12
-#define TNOT 13
-#define TCASE 14
-#define TDO 15
-#define TDONE 16
-#define TELIF 17
-#define TELSE 18
-#define TESAC 19
-#define TFI 20
-#define TFOR 21
-#define TIF 22
-#define TIN 23
-#define TTHEN 24
-#define TUNTIL 25
-#define TWHILE 26
-#define TBEGIN 27
-#define TEND 28
+enum {
+	TEOF,
+	TNL,
+	TREDIR,
+	TWORD,
+	TSEMI,
+	TBACKGND,
+	TAND,
+	TOR,
+	TPIPE,
+	TLP,
+	TRP,
+	TENDCASE,
+	TENDBQUOTE,
+	TNOT,
+	TCASE,
+	TDO,
+	TDONE,
+	TELIF,
+	TELSE,
+	TESAC,
+	TFI,
+	TFOR,
+#if ENABLE_ASH_BASH_COMPAT
+	TFUNCTION,
+#endif
+	TIF,
+	TIN,
+	TTHEN,
+	TUNTIL,
+	TWHILE,
+	TBEGIN,
+	TEND
+};
 typedef smallint token_id_t;
 
 /* first char is indicating which tokens mark the end of a list */
@@ -7784,6 +7787,9 @@ static const char *const tokname_array[] = {
 	"\1esac",
 	"\1fi",
 	"\0for",
+#if ENABLE_ASH_BASH_COMPAT
+	"\0function",
+#endif
 	"\0if",
 	"\0in",
 	"\1then",
@@ -7812,14 +7818,15 @@ findkwd(const char *s)
  * Locate and print what a word is...
  */
 static int
-describe_command(char *command, int describe_command_verbose)
+describe_command(char *command, const char *path, int describe_command_verbose)
 {
 	struct cmdentry entry;
 	struct tblentry *cmdp;
 #if ENABLE_ASH_ALIAS
 	const struct alias *ap;
 #endif
-	const char *path = pathval();
+
+	path = path ? path : pathval();
 
 	if (describe_command_verbose) {
 		out1str(command);
@@ -7919,7 +7926,7 @@ typecmd(int argc UNUSED_PARAM, char **argv)
 		verbose = 0;
 	}
 	while (argv[i]) {
-		err |= describe_command(argv[i++], verbose);
+		err |= describe_command(argv[i++], NULL, verbose);
 	}
 	return err;
 }
@@ -7933,6 +7940,7 @@ commandcmd(int argc UNUSED_PARAM, char **argv UNUSED_PARAM)
 		VERIFY_BRIEF = 1,
 		VERIFY_VERBOSE = 2,
 	} verify = 0;
+	const char *path = NULL;
 
 	while ((c = nextopt("pvV")) != '\0')
 		if (c == 'V')
@@ -7943,9 +7951,11 @@ commandcmd(int argc UNUSED_PARAM, char **argv UNUSED_PARAM)
 		else if (c != 'p')
 			abort();
 #endif
+		else
+			path = bb_default_path;
 	/* Mimic bash: just "command -v" doesn't complain, it's a nop */
 	if (verify && (*argptr != NULL)) {
-		return describe_command(*argptr, verify - VERIFY_BRIEF);
+		return describe_command(*argptr, path, verify - VERIFY_BRIEF);
 	}
 
 	return 0;
@@ -8418,7 +8428,7 @@ evaltree(union node *n, int flags)
 			n->nbinary.ch1,
 			(flags | ((is_or >> 1) - 1)) & EV_TESTED
 		);
-		if (!exitstatus == is_or)
+		if ((!exitstatus) == is_or)
 			break;
 		if (!evalskip) {
 			n = n->nbinary.ch2;
@@ -8878,14 +8888,15 @@ parse_command_args(char **argv, const char **path)
 	for (;;) {
 		cp = *++argv;
 		if (!cp)
-			return 0;
+			return NULL;
 		if (*cp++ != '-')
 			break;
 		c = *cp++;
 		if (!c)
 			break;
 		if (c == '-' && !*cp) {
-			argv++;
+			if (!*++argv)
+				return NULL;
 			break;
 		}
 		do {
@@ -8895,7 +8906,7 @@ parse_command_args(char **argv, const char **path)
 				break;
 			default:
 				/* run 'typecmd' for other options */
-				return 0;
+				return NULL;
 			}
 			c = *cp++;
 		} while (c);
@@ -8981,6 +8992,9 @@ static int FAST_FUNC
 localcmd(int argc UNUSED_PARAM, char **argv)
 {
 	char *name;
+
+	if (!funcnest)
+		ash_msg_and_raise_error("not in a function");
 
 	argv = argptr;
 	while ((name = *argv++) != NULL) {
@@ -9424,7 +9438,7 @@ evalcommand(union node *cmd, int flags)
 		if (evalbltin(cmdentry.u.cmd, argc, argv)) {
 			int exit_status;
 			int i = exception_type;
-			if (i == EXEXIT)
+			if (i == EXEXIT || i == EXEXEC)
 				goto raise;
 			exit_status = 2;
 			if (i == EXINT)
@@ -9677,7 +9691,7 @@ preadfd(void)
 			}
 # if ENABLE_ASH_IDLE_TIMEOUT
 			else if (errno == EAGAIN && timeout > 0) {
-				printf("\007timed out waiting for input: auto-logout\n");
+				puts("\007timed out waiting for input: auto-logout");
 				exitshell();
 			}
 # endif
@@ -10029,10 +10043,8 @@ setinputstring(char *string)
 
 #if ENABLE_ASH_MAIL
 
-#define MAXMBOXES 10
-
-/* times of mailboxes */
-static time_t mailtime[MAXMBOXES];
+/* Hash of mtimes of mailboxes */
+static unsigned mailtime_hash;
 /* Set if MAIL or MAILPATH is changed. */
 static smallint mail_var_path_changed;
 
@@ -10048,13 +10060,14 @@ chkmail(void)
 	const char *mpath;
 	char *p;
 	char *q;
-	time_t *mtp;
+	unsigned new_hash;
 	struct stackmark smark;
 	struct stat statb;
 
 	setstackmark(&smark);
 	mpath = mpathset() ? mpathval() : mailval();
-	for (mtp = mailtime; mtp < mailtime + MAXMBOXES; mtp++) {
+	new_hash = 0;
+	for (;;) {
 		p = path_advance(&mpath, nullstr);
 		if (p == NULL)
 			break;
@@ -10068,16 +10081,15 @@ chkmail(void)
 #endif
 		q[-1] = '\0';                   /* delete trailing '/' */
 		if (stat(p, &statb) < 0) {
-			*mtp = 0;
 			continue;
 		}
-		if (!mail_var_path_changed && statb.st_mtime != *mtp) {
-			fprintf(
-				stderr, "%s\n",
-				pathopt ? pathopt : "you have mail"
-			);
-		}
-		*mtp = statb.st_mtime;
+		/* Very simplistic "hash": just a sum of all mtimes */
+		new_hash += (unsigned)statb.st_mtime;
+	}
+	if (!mail_var_path_changed && mailtime_hash != new_hash) {
+		if (mailtime_hash != 0)
+			out2str("you have mail\n");
+		mailtime_hash = new_hash;
 	}
 	mail_var_path_changed = 0;
 	popstackmark(&smark);
@@ -10349,8 +10361,10 @@ getopts(char *optstr, char *optvar, char **optfirst, int *param_optind, int *opt
 	char c = '?';
 	int done = 0;
 	int err = 0;
-	char s[12];
+	char sbuf[2];
 	char **optnext;
+
+	sbuf[1] = '\0';
 
 	if (*param_optind < 1)
 		return 1;
@@ -10378,9 +10392,9 @@ getopts(char *optstr, char *optvar, char **optfirst, int *param_optind, int *opt
 	for (q = optstr; *q != c;) {
 		if (*q == '\0') {
 			if (optstr[0] == ':') {
-				s[0] = c;
-				s[1] = '\0';
-				err |= setvarsafe("OPTARG", s, 0);
+				sbuf[0] = c;
+				/*sbuf[1] = '\0'; - already is */
+				err |= setvarsafe("OPTARG", sbuf, 0);
 			} else {
 				fprintf(stderr, "Illegal option -%c\n", c);
 				unsetvar("OPTARG");
@@ -10395,9 +10409,9 @@ getopts(char *optstr, char *optvar, char **optfirst, int *param_optind, int *opt
 	if (*++q == ':') {
 		if (*p == '\0' && (p = *optnext) == NULL) {
 			if (optstr[0] == ':') {
-				s[0] = c;
-				s[1] = '\0';
-				err |= setvarsafe("OPTARG", s, 0);
+				sbuf[0] = c;
+				/*sbuf[1] = '\0'; - already is */
+				err |= setvarsafe("OPTARG", sbuf, 0);
 				c = ':';
 			} else {
 				fprintf(stderr, "No arg for -%c option\n", c);
@@ -10416,11 +10430,10 @@ getopts(char *optstr, char *optvar, char **optfirst, int *param_optind, int *opt
  out:
 	*optoff = p ? p - *(optnext - 1) : -1;
 	*param_optind = optnext - optfirst + 1;
-	fmtstr(s, sizeof(s), "%d", *param_optind);
-	err |= setvarsafe("OPTIND", s, VNOFUNC);
-	s[0] = c;
-	s[1] = '\0';
-	err |= setvarsafe(optvar, s, 0);
+	err |= setvarsafe("OPTIND", itoa(*param_optind), VNOFUNC);
+	sbuf[0] = c;
+	/*sbuf[1] = '\0'; - already is */
+	err |= setvarsafe(optvar, sbuf, 0);
 	if (err) {
 		*param_optind = 1;
 		*optoff = -1;
@@ -10517,7 +10530,7 @@ static union node *andor(void);
 static union node *pipeline(void);
 static union node *parse_command(void);
 static void parseheredoc(void);
-static char nexttoken_ends_list(void);
+static int peektoken(void);
 static int readtoken(void);
 
 static union node *
@@ -10526,11 +10539,27 @@ list(int nlflag)
 	union node *n1, *n2, *n3;
 	int tok;
 
-	checkkwd = CHKNL | CHKKWD | CHKALIAS;
-	if (nlflag == 2 && nexttoken_ends_list())
-		return NULL;
 	n1 = NULL;
 	for (;;) {
+		switch (peektoken()) {
+		case TNL:
+			if (!(nlflag & 1))
+				break;
+			parseheredoc();
+			return n1;
+
+		case TEOF:
+			if (!n1 && (nlflag & 1))
+				n1 = NODE_EOF;
+			parseheredoc();
+			return n1;
+		}
+
+		checkkwd = CHKNL | CHKKWD | CHKALIAS;
+		if (nlflag == 2 && tokname_array[peektoken()][0])
+			return n1;
+		nlflag |= 2;
+
 		n2 = andor();
 		tok = readtoken();
 		if (tok == TBACKGND) {
@@ -10556,37 +10585,15 @@ list(int nlflag)
 			n1 = n3;
 		}
 		switch (tok) {
+		case TNL:
+		case TEOF:
+			tokpushback = 1;
+			/* fall through */
 		case TBACKGND:
 		case TSEMI:
-			tok = readtoken();
-			/* fall through */
-		case TNL:
-			if (tok == TNL) {
-				parseheredoc();
-				if (nlflag == 1)
-					return n1;
-			} else {
-				tokpushback = 1;
-			}
-			checkkwd = CHKNL | CHKKWD | CHKALIAS;
-			if (nexttoken_ends_list()) {
-				/* Testcase: "<<EOF; then <W".
-				 * It used to segfault w/o this check:
-				 */
-				if (heredoclist) {
-					raise_error_unexpected_syntax(-1);
-				}
-				return n1;
-			}
 			break;
-		case TEOF:
-			if (heredoclist)
-				parseheredoc();
-			else
-				pungetc();              /* push back EOF on input */
-			return n1;
 		default:
-			if (nlflag == 1)
+			if ((nlflag & 1))
 				raise_error_unexpected_syntax(-1);
 			tokpushback = 1;
 			return n1;
@@ -10761,6 +10768,7 @@ simplecmd(void)
 	int savecheckkwd;
 #if ENABLE_ASH_BASH_COMPAT
 	smallint double_brackets_flag = 0;
+	smallint function_flag = 0;
 #endif
 
 	args = NULL;
@@ -10777,6 +10785,11 @@ simplecmd(void)
 		t = readtoken();
 		switch (t) {
 #if ENABLE_ASH_BASH_COMPAT
+		case TFUNCTION:
+			if (peektoken() != TWORD)
+				raise_error_unexpected_syntax(TWORD);
+			function_flag = 1;
+			break;
 		case TAND: /* "&&" */
 		case TOR: /* "||" */
 			if (!double_brackets_flag) {
@@ -10805,6 +10818,29 @@ simplecmd(void)
 				app = &n->narg.next;
 				savecheckkwd = 0;
 			}
+#if ENABLE_ASH_BASH_COMPAT
+			if (function_flag) {
+				checkkwd = CHKNL | CHKKWD;
+				switch (peektoken()) {
+				case TBEGIN:
+				case TIF:
+				case TCASE:
+				case TUNTIL:
+				case TWHILE:
+				case TFOR:
+					goto do_func;
+				case TLP:
+					function_flag = 0;
+					break;
+				case TWORD:
+					if (strcmp("[[", wordtext) == 0)
+						goto do_func;
+					/* fall through */
+				default:
+					raise_error_unexpected_syntax(-1);
+				}
+			}
+#endif
 			break;
 		case TREDIR:
 			*rpp = n = redirnode;
@@ -10812,6 +10848,7 @@ simplecmd(void)
 			parsefname();   /* read name of redirection file */
 			break;
 		case TLP:
+ IF_ASH_BASH_COMPAT(do_func:)
 			if (args && app == &args->narg.next
 			 && !vars && !redir
 			) {
@@ -10819,7 +10856,7 @@ simplecmd(void)
 				const char *name;
 
 				/* We have a function */
-				if (readtoken() != TRP)
+				if (IF_ASH_BASH_COMPAT(!function_flag &&) readtoken() != TRP)
 					raise_error_unexpected_syntax(TRP);
 				name = n->narg.text;
 				if (!goodname(name)
@@ -10832,6 +10869,7 @@ simplecmd(void)
 				n->narg.next = parse_command();
 				return n;
 			}
+			IF_ASH_BASH_COMPAT(function_flag = 0;)
 			/* fall through */
 		default:
 			tokpushback = 1;
@@ -10914,7 +10952,7 @@ parse_command(void)
 		n1 = stzalloc(sizeof(struct nfor));
 		n1->type = NFOR;
 		n1->nfor.var = wordtext;
-		checkkwd = CHKKWD | CHKALIAS;
+		checkkwd = CHKNL | CHKKWD | CHKALIAS;
 		if (readtoken() == TIN) {
 			app = &ap;
 			while (readtoken() == TWORD) {
@@ -10941,7 +10979,7 @@ parse_command(void)
 			 * Newline or semicolon here is optional (but note
 			 * that the original Bourne shell only allowed NL).
 			 */
-			if (lasttoken != TNL && lasttoken != TSEMI)
+			if (lasttoken != TSEMI)
 				tokpushback = 1;
 		}
 		checkkwd = CHKNL | CHKKWD | CHKALIAS;
@@ -10960,10 +10998,8 @@ parse_command(void)
 		/*n2->narg.next = NULL; - stzalloc did it */
 		n2->narg.text = wordtext;
 		n2->narg.backquote = backquotelist;
-		do {
-			checkkwd = CHKKWD | CHKALIAS;
-		} while (readtoken() == TNL);
-		if (lasttoken != TIN)
+		checkkwd = CHKNL | CHKKWD | CHKALIAS;
+		if (readtoken() != TIN)
 			raise_error_unexpected_syntax(TIN);
 		cpp = &n1->ncase.cases;
  next_case:
@@ -11014,6 +11050,7 @@ parse_command(void)
 		n1 = list(0);
 		t = TEND;
 		break;
+	IF_ASH_BASH_COMPAT(case TFUNCTION:)
 	case TWORD:
 	case TREDIR:
 		tokpushback = 1;
@@ -11894,6 +11931,7 @@ static int
 readtoken(void)
 {
 	int t;
+	int kwd = checkkwd;
 #if DEBUG
 	smallint alreadyseen = tokpushback;
 #endif
@@ -11907,7 +11945,7 @@ readtoken(void)
 	/*
 	 * eat newlines
 	 */
-	if (checkkwd & CHKNL) {
+	if (kwd & CHKNL) {
 		while (t == TNL) {
 			parseheredoc();
 			t = xxreadtoken();
@@ -11921,7 +11959,7 @@ readtoken(void)
 	/*
 	 * check for keywords
 	 */
-	if (checkkwd & CHKKWD) {
+	if (kwd & CHKKWD) {
 		const char *const *pp;
 
 		pp = findkwd(wordtext);
@@ -11955,14 +11993,14 @@ readtoken(void)
 	return t;
 }
 
-static char
-nexttoken_ends_list(void)
+static int
+peektoken(void)
 {
 	int t;
 
 	t = readtoken();
 	tokpushback = 1;
-	return tokname_array[t][0];
+	return t;
 }
 
 /*
@@ -11972,18 +12010,12 @@ nexttoken_ends_list(void)
 static union node *
 parsecmd(int interact)
 {
-	int t;
-
 	tokpushback = 0;
+	checkkwd = 0;
+	heredoclist = 0;
 	doprompt = interact;
 	setprompt_if(doprompt, doprompt);
 	needprompt = 0;
-	t = readtoken();
-	if (t == TEOF)
-		return NODE_EOF;
-	if (t == TNL)
-		return NULL;
-	tokpushback = 1;
 	return list(1);
 }
 
@@ -12116,7 +12148,7 @@ cmdloop(int top)
 		setstackmark(&smark);
 #if JOBS
 		if (doing_jobctl)
-			showjobs(stderr, SHOW_CHANGED);
+			showjobs(SHOW_CHANGED|SHOW_STDERR);
 #endif
 		inter = 0;
 		if (iflag && top) {
@@ -12809,21 +12841,11 @@ readcmd(int argc UNUSED_PARAM, char **argv UNUSED_PARAM)
 }
 
 static int FAST_FUNC
-umaskcmd(int argc UNUSED_PARAM, char **argv)
+umaskcmd(int argc UNUSED_PARAM, char **argv UNUSED_PARAM)
 {
-	static const char permuser[3] ALIGN1 = "ugo";
-	static const char permmode[3] ALIGN1 = "rwx";
-	static const short permmask[] ALIGN2 = {
-		S_IRUSR, S_IWUSR, S_IXUSR,
-		S_IRGRP, S_IWGRP, S_IXGRP,
-		S_IROTH, S_IWOTH, S_IXOTH
-	};
+	static const char permuser[3] ALIGN1 = "ogu";
 
-	/* TODO: use bb_parse_mode() instead */
-
-	char *ap;
 	mode_t mask;
-	int i;
 	int symbolic_mode = 0;
 
 	while (nextopt("S") != '\0') {
@@ -12835,45 +12857,43 @@ umaskcmd(int argc UNUSED_PARAM, char **argv)
 	umask(mask);
 	INT_ON;
 
-	ap = *argptr;
-	if (ap == NULL) {
+	if (*argptr == NULL) {
 		if (symbolic_mode) {
-			char buf[18];
+			char buf[sizeof(",u=rwx,g=rwx,o=rwx")];
 			char *p = buf;
+			int i;
 
-			for (i = 0; i < 3; i++) {
-				int j;
-
+			i = 2;
+			for (;;) {
+				*p++ = ',';
 				*p++ = permuser[i];
 				*p++ = '=';
-				for (j = 0; j < 3; j++) {
-					if ((mask & permmask[3 * i + j]) == 0) {
-						*p++ = permmode[j];
-					}
-				}
-				*p++ = ',';
+				/* mask is 0..0uuugggooo. i=2 selects uuu bits */
+				if (!(mask & 0400)) *p++ = 'r';
+				if (!(mask & 0200)) *p++ = 'w';
+				if (!(mask & 0100)) *p++ = 'x';
+				mask <<= 3;
+				if (--i < 0)
+					break;
 			}
-			*--p = 0;
-			puts(buf);
+			*p = '\0';
+			puts(buf + 1);
 		} else {
-			out1fmt("%.4o\n", mask);
+			out1fmt("%04o\n", mask);
 		}
 	} else {
-		if (isdigit((unsigned char) *ap)) {
-			mask = 0;
-			do {
-				if (*ap >= '8' || *ap < '0')
-					ash_msg_and_raise_error(msg_illnum, argv[1]);
-				mask = (mask << 3) + (*ap - '0');
-			} while (*++ap != '\0');
-			umask(mask);
-		} else {
-			mask = ~mask & 0777;
-			if (!bb_parse_mode(ap, &mask)) {
-				ash_msg_and_raise_error("illegal mode: %s", ap);
-			}
-			umask(~mask & 0777);
+		char *modestr = *argptr;
+                /* numeric umasks are taken as-is */
+                /* symbolic umasks are inverted: "umask a=rx" calls umask(222) */
+		if (!isdigit(modestr[0]))
+			mask ^= 0777;
+		mask = bb_parse_mode(modestr, mask);
+		if ((unsigned)mask > 0777) {
+			ash_msg_and_raise_error("illegal mode: %s", modestr);
 		}
+		if (!isdigit(modestr[0]))
+			mask ^= 0777;
+		umask(mask);
 	}
 	return 0;
 }
@@ -13140,7 +13160,7 @@ int ash_main(int argc UNUSED_PARAM, char **argv)
 			exitshell();
 		}
 		if (e == EXINT) {
-			outcslow('\n', stderr);
+			newline_and_flush(stderr);
 		}
 
 		popstackmark(&smark);

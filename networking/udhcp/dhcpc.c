@@ -29,6 +29,20 @@
 #include <linux/filter.h>
 #include <linux/if_packet.h>
 
+#ifndef PACKET_AUXDATA
+# define PACKET_AUXDATA 8
+struct tpacket_auxdata {
+	uint32_t tp_status;
+	uint32_t tp_len;
+	uint32_t tp_snaplen;
+	uint16_t tp_mac;
+	uint16_t tp_net;
+	uint16_t tp_vlan_tci;
+	uint16_t tp_padding;
+};
+#endif
+
+
 /* "struct client_config_t client_config" is in bb_common_bufsiz1 */
 
 
@@ -187,6 +201,8 @@ static int good_hostname(const char *name)
 			//Do we want this?
 			//return ((name - start) < 1025); /* NS_MAXDNAME */
 		name++;
+		if (*name == '\0')
+			return 1; // We allow trailing dot too
 	}
 }
 #else
