@@ -128,7 +128,7 @@
      "\n	-f	Force" \
 
 #define cpio_trivial_usage \
-       "[-dmvu] [-F FILE]" IF_FEATURE_CPIO_O(" [-H newc]") \
+       "[-dmvu] [-F FILE] [-R USER[:GRP]]" IF_FEATURE_CPIO_O(" [-H newc]") \
        " [-ti"IF_FEATURE_CPIO_O("o")"]" IF_FEATURE_CPIO_P(" [-p DIR]") \
        " [EXTR_FILE]..." \
 
@@ -154,6 +154,7 @@
      "\n	-v	Verbose" \
      "\n	-u	Overwrite" \
      "\n	-F FILE	Input (-t,-i,-p) or output (-o) file" \
+     "\n	-R USER[:GRP]	Set owner of created files" \
 	IF_FEATURE_CPIO_O( \
      "\n	-H newc	Archive format" \
 	) \
@@ -558,10 +559,10 @@
        "-r--r--r--    1 root     root            0 Apr 12 18:25 /tmp/foo\n" \
 
 #define chown_trivial_usage \
-       "[-Rh"IF_DESKTOP("LHPcvf")"]... OWNER[<.|:>[GROUP]] FILE..." \
+       "[-Rh"IF_DESKTOP("LHPcvf")"]... USER[:[GRP]] FILE..." \
 
 #define chown_full_usage "\n\n" \
-       "Change the owner and/or group of each FILE to OWNER and/or GROUP\n" \
+       "Change the owner and/or group of each FILE to USER and/or GRP\n" \
      "\n	-R	Recurse" \
      "\n	-h	Affect symlinks instead of symlink targets" \
 	IF_DESKTOP( \
@@ -694,7 +695,7 @@
 
 #define dd_trivial_usage \
        "[if=FILE] [of=FILE] " IF_FEATURE_DD_IBS_OBS("[ibs=N] [obs=N] ") "[bs=N] [count=N] [skip=N]\n" \
-       "	[seek=N]" IF_FEATURE_DD_IBS_OBS(" [conv=notrunc|noerror|sync|fsync]") \
+       "	[seek=N]" IF_FEATURE_DD_IBS_OBS(" [conv=notrunc|noerror|sync|fsync] [iflag=skip_bytes]") \
 
 #define dd_full_usage "\n\n" \
        "Copy a file with converting and formatting\n" \
@@ -716,6 +717,7 @@
      "\n	conv=sync	Pad blocks with zeros" \
      "\n	conv=fsync	Physically write data out before finishing" \
      "\n	conv=swab	Swap every pair of bytes" \
+     "\n	iflag=skip_bytes	skip=N is in bytes" \
 	) \
 	IF_FEATURE_DD_STATUS( \
      "\n	status=noxfer	Suppress rate output" \
@@ -1449,50 +1451,55 @@
        "[OPTIONS] FILE..." \
 
 #define stat_full_usage "\n\n" \
-       "Display file (default) or filesystem status\n" \
+       "Display file" \
+            IF_FEATURE_STAT_FILESYSTEM(" (default) or filesystem") \
+            " status\n" \
 	IF_FEATURE_STAT_FORMAT( \
-     "\n	-c fmt	Use the specified format" \
+     "\n	-c FMT	Use the specified format" \
 	) \
+	IF_FEATURE_STAT_FILESYSTEM( \
      "\n	-f	Display filesystem status" \
+	) \
      "\n	-L	Follow links" \
-     "\n	-t	Display info in terse form" \
+     "\n	-t	Terse display" \
 	IF_SELINUX( \
      "\n	-Z	Print security context" \
 	) \
 	IF_FEATURE_STAT_FORMAT( \
-       "\n\nValid format sequences for files:\n" \
+       "\n\nFMT sequences"IF_FEATURE_STAT_FILESYSTEM(" for files")":\n" \
        " %a	Access rights in octal\n" \
        " %A	Access rights in human readable form\n" \
        " %b	Number of blocks allocated (see %B)\n" \
-       " %B	The size in bytes of each block reported by %b\n" \
+       " %B	Size in bytes of each block reported by %b\n" \
        " %d	Device number in decimal\n" \
        " %D	Device number in hex\n" \
        " %f	Raw mode in hex\n" \
        " %F	File type\n" \
-       " %g	Group ID of owner\n" \
-       " %G	Group name of owner\n" \
+       " %g	Group ID\n" \
+       " %G	Group name\n" \
        " %h	Number of hard links\n" \
        " %i	Inode number\n" \
        " %n	File name\n" \
        " %N	File name, with -> TARGET if symlink\n" \
        " %o	I/O block size\n" \
-       " %s	Total size, in bytes\n" \
+       " %s	Total size in bytes\n" \
        " %t	Major device type in hex\n" \
        " %T	Minor device type in hex\n" \
-       " %u	User ID of owner\n" \
-       " %U	User name of owner\n" \
+       " %u	User ID\n" \
+       " %U	User name\n" \
        " %x	Time of last access\n" \
        " %X	Time of last access as seconds since Epoch\n" \
        " %y	Time of last modification\n" \
        " %Y	Time of last modification as seconds since Epoch\n" \
        " %z	Time of last change\n" \
        " %Z	Time of last change as seconds since Epoch\n" \
-       "\nValid format sequences for file systems:\n" \
+	IF_FEATURE_STAT_FILESYSTEM( \
+       "\nFMT sequences for file systems:\n" \
        " %a	Free blocks available to non-superuser\n" \
-       " %b	Total data blocks in file system\n" \
-       " %c	Total file nodes in file system\n" \
-       " %d	Free file nodes in file system\n" \
-       " %f	Free blocks in file system\n" \
+       " %b	Total data blocks\n" \
+       " %c	Total file nodes\n" \
+       " %d	Free file nodes\n" \
+       " %f	Free blocks\n" \
 	IF_SELINUX( \
        " %C	Security context in selinux\n" \
 	) \
@@ -1503,6 +1510,7 @@
        " %S	Fundamental block size (for block counts)\n" \
        " %t	Type in hex\n" \
        " %T	Type in human readable form" \
+	) \
 	) \
 
 #define stty_trivial_usage \
@@ -1929,11 +1937,9 @@
        "[-R] [-+=AacDdijsStTu] [-v VERSION] [FILE]..." \
 
 #define chattr_full_usage "\n\n" \
-       "Change file attributes on an ext2 fs\n" \
+       "Change ext2 file attributes\n" \
      "\nModifiers:" \
-     "\n	-	Remove attributes" \
-     "\n	+	Add attributes" \
-     "\n	=	Set attributes" \
+     "\n	-,+,=	Remove/add/set attributes" \
      "\nAttributes:" \
      "\n	A	Don't track atime" \
      "\n	a	Append mode only" \
@@ -1943,14 +1949,14 @@
      "\n	i	Cannot be modified (immutable)" \
      "\n	j	Write all data to journal first" \
      "\n	s	Zero disk storage when deleted" \
-     "\n	S	Write file contents synchronously" \
+     "\n	S	Write synchronously" \
      "\n	t	Disable tail-merging of partial blocks with other files" \
      "\n	u	Allow file to be undeleted" \
      "\n	-R	Recurse" \
-     "\n	-v	Set the file's version/generation number" \
+     "\n	-v VER	Set version/generation number" \
 
 #define fsck_trivial_usage \
-       "[-ANPRTV] [-C FD] [-t FSTYPE] [FS_OPTS] [BLOCKDEV]..." \
+       "[-ANPRTV] [-t FSTYPE] [FS_OPTS] [BLOCKDEV]..." \
 
 #define fsck_full_usage "\n\n" \
        "Check and repair filesystems\n" \
@@ -1960,19 +1966,18 @@
      "\n	-R	With -A, skip the root filesystem" \
      "\n	-T	Don't show title on startup" \
      "\n	-V	Verbose" \
-     "\n	-C n	Write status information to specified filedescriptor" \
      "\n	-t TYPE	List of filesystem types to check" \
 
 #define lsattr_trivial_usage \
        "[-Radlv] [FILE]..." \
 
 #define lsattr_full_usage "\n\n" \
-       "List file attributes on an ext2 fs\n" \
+       "List ext2 file attributes\n" \
      "\n	-R	Recurse" \
      "\n	-a	Don't hide entries starting with ." \
      "\n	-d	List directory entries instead of contents" \
      "\n	-l	List long flag names" \
-     "\n	-v	List the file's version/generation number" \
+     "\n	-v	List version/generation number" \
 
 #define tune2fs_trivial_usage \
        "[-c MAX_MOUNT_COUNT] " \
@@ -2501,17 +2506,19 @@
      "\n	-k SKEL		Skeleton directory (/etc/skel)" \
 
 #define chpasswd_trivial_usage \
-	IF_LONG_OPTS("[--md5|--encrypted]") IF_NOT_LONG_OPTS("[-m|-e]") \
+	IF_LONG_OPTS("[--md5|--encrypted|--crypt-method]") IF_NOT_LONG_OPTS("[-m|-e|-c]") \
 
 #define chpasswd_full_usage "\n\n" \
        "Read user:password from stdin and update /etc/passwd\n" \
 	IF_LONG_OPTS( \
-     "\n	-e,--encrypted	Supplied passwords are in encrypted form" \
-     "\n	-m,--md5	Use MD5 encryption instead of DES" \
+     "\n	-e,--encrypted		Supplied passwords are in encrypted form" \
+     "\n	-m,--md5		Use MD5 encryption instead of DES" \
+     "\n	-c,--crypt-method	Use the specified method to encrypt the passwords" \
 	) \
 	IF_NOT_LONG_OPTS( \
      "\n	-e	Supplied passwords are in encrypted form" \
      "\n	-m	Use MD5 encryption instead of DES" \
+     "\n	-c	Use the specified method to encrypt the passwords" \
 	) \
 
 #define cryptpw_trivial_usage \
@@ -2584,7 +2591,7 @@
 #define login_full_usage "\n\n" \
        "Begin a new session on the system\n" \
      "\n	-f	Don't authenticate (user already authenticated)" \
-     "\n	-h	Name of the remote host" \
+     "\n	-h HOST	Host user came from (for network logins)" \
      "\n	-p	Preserve environment" \
 
 #define passwd_trivial_usage \
@@ -3200,18 +3207,20 @@
        "setpart tell unload unlock weof wset" \
 
 #define nandwrite_trivial_usage \
-	"[-p] [-s ADDR] MTD_DEVICE [FILE]" \
+	"[-np] [-s ADDR] MTD_DEVICE [FILE]" \
 
 #define nandwrite_full_usage "\n\n" \
 	"Write to MTD_DEVICE\n" \
+     "\n	-n	Write without ecc" \
      "\n	-p	Pad to page size" \
      "\n	-s ADDR	Start address" \
 
 #define nanddump_trivial_usage \
-	"[-o]" IF_LONG_OPTS(" [--bb=padbad|skipbad]") " [-s ADDR] [-l LEN] [-f FILE] MTD_DEVICE" \
+	"[-no]" IF_LONG_OPTS(" [--bb=padbad|skipbad]") " [-s ADDR] [-l LEN] [-f FILE] MTD_DEVICE" \
 
 #define nanddump_full_usage "\n\n" \
 	"Dump MTD_DEVICE\n" \
+     "\n	-n	Read without ecc" \
      "\n	-o	Dump oob data" \
      "\n	-s ADDR	Start address" \
      "\n	-l LEN	Length" \
@@ -3298,12 +3307,12 @@
 	"	U6_16550A" \
 
 #define setsid_trivial_usage \
-       "PROG ARGS" \
+       "[-c] PROG ARGS" \
 
 #define setsid_full_usage "\n\n" \
        "Run PROG in a new session. PROG will have no controlling terminal\n" \
-       "and will not be affected by keyboard signals (Ctrl-C etc).\n" \
-       "See setsid(2) for details." \
+       "and will not be affected by keyboard signals (^C etc).\n" \
+     "\n	-c	Set controlling terminal to stdin" \
 
 #define strings_trivial_usage \
        "[-afo] [-n LEN] [FILE]..." \
@@ -3478,7 +3487,7 @@
 #endif \
 
 #define modinfo_trivial_usage \
-       "[-adlp0] [-F keyword] MODULE" \
+       "[-adlpn0] [-F keyword] MODULE" \
 
 #define modinfo_full_usage "\n\n" \
        "	-a		Shortcut for '-F author'" \
@@ -3948,6 +3957,7 @@
 	IF_FEATURE_IP_ROUTE("route | ") \
 	IF_FEATURE_IP_LINK("link | ") \
 	IF_FEATURE_IP_TUNNEL("tunnel | ") \
+	IF_FEATURE_IP_NEIGH("neigh | ") \
 	IF_FEATURE_IP_RULE("rule") \
        "} {COMMAND}" \
 
@@ -3958,6 +3968,7 @@
 	IF_FEATURE_IP_ROUTE("route | ") \
 	IF_FEATURE_IP_LINK("link | ") \
 	IF_FEATURE_IP_TUNNEL("tunnel | ") \
+	IF_FEATURE_IP_NEIGH("neigh | ") \
 	IF_FEATURE_IP_RULE("rule") \
        "}\n" \
        "OPTIONS := { -f[amily] { inet | inet6 | link } | -o[neline] }" \
@@ -4018,6 +4029,12 @@
        "	[mode { ipip | gre | sit }] [remote ADDR] [local ADDR]\n" \
        "	[[i|o]seq] [[i|o]key KEY] [[i|o]csum]\n" \
        "	[ttl TTL] [tos TOS] [[no]pmtudisc] [dev PHYS_DEV]" \
+
+#define ipneigh_trivial_usage \
+       "{ show | flush} [ to PREFIX ] [ dev DEV ] [ nud STATE ]" \
+
+#define ipneigh_full_usage "\n\n" \
+       "ipneigh { show | flush} [ to PREFIX ] [ dev DEV ] [ nud STATE ]" \
 
 #define ipcalc_trivial_usage \
        "[OPTIONS] ADDRESS" \
@@ -4789,7 +4806,7 @@
        "[-xq] PID" \
 
 #define pmap_full_usage "\n\n" \
-       "Display detailed process memory usage" \
+       "Display process memory usage" \
      "\n" \
      "\n	-x	Show details" \
      "\n	-q	Quiet" \
@@ -5375,6 +5392,18 @@
        "# acpid -l /var/log/my-acpi-log\n" \
        "# acpid -e /proc/acpi/event\n" \
 
+#define blkdiscard_trivial_usage \
+       "[-o OFS] [-l LEN] [-s] DEVICE" \
+
+#define blkdiscard_full_usage "\n\n" \
+	"Discard sectors on DEVICE\n" \
+	"\n	-o OFS	Byte offset into device" \
+	"\n	-l LEN	Number of bytes to discard" \
+	"\n	-s	Perform a secure discard" \
+
+#define blkdiscard_example_usage \
+	"$ blkdiscard -o 0 -l 1G /dev/sdb" \
+
 #define blkid_trivial_usage \
        "[BLOCKDEV]..." \
 
@@ -5948,12 +5977,14 @@
        "Play back typescripts, using timing information" \
 
 #define setarch_trivial_usage \
-       "personality PROG ARGS" \
+       "PERSONALITY [-R] PROG ARGS" \
 
 #define setarch_full_usage "\n\n" \
-       "Personality may be:\n" \
-       "	linux32		Set 32bit uname emulation\n" \
-       "	linux64		Set 64bit uname emulation" \
+       "PERSONALITY may be:" \
+   "\n""	linux32	Set 32bit uname emulation" \
+   "\n""	linux64	Set 64bit uname emulation" \
+   "\n" \
+   "\n""	-R	Disable address space randomization" \
 
 #define linux32_trivial_usage NOUSAGE_STR \
 
@@ -5979,12 +6010,11 @@
 	) \
 
 #define swapoff_trivial_usage \
-       "[-a] [-e] [DEVICE]" \
+       "[-a] [DEVICE]" \
 
 #define swapoff_full_usage "\n\n" \
        "Stop swapping on DEVICE\n" \
      "\n	-a	Stop swapping on all swap devices" \
-     "\n	-e	Silently skip devices that do not exist" \
 
 #define switch_root_trivial_usage \
        "[-c /dev/console] NEW_ROOT NEW_INIT [ARGS]" \
@@ -6220,7 +6250,7 @@
        "Relay DHCP requests between clients and server" \
 
 #define dumpleases_trivial_usage \
-       "[-r|-a] [-f LEASEFILE]" \
+       "[-r|-a] [-d] [-f LEASEFILE]" \
 
 #define dumpleases_full_usage "\n\n" \
        "Display DHCP leases granted by udhcpd\n" \
@@ -6228,11 +6258,13 @@
      "\n	-f,--file=FILE	Lease file" \
      "\n	-r,--remaining	Show remaining time" \
      "\n	-a,--absolute	Show expiration time" \
+     "\n	-d,--decimal	Show time in seconds" \
 	) \
 	IF_NOT_LONG_OPTS( \
      "\n	-f FILE	Lease file" \
      "\n	-r	Show remaining time" \
      "\n	-a	Show expiration time" \
+     "\n	-d	Show time in seconds" \
 	) \
 
 #define busybox_notes_usage \
