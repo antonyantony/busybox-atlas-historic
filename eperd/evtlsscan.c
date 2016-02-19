@@ -29,7 +29,7 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
-#include "openssl_hostname_validation.h"
+#include "tls_hostname_validation.h"
 
 #define SAFE_PREFIX ATLAS_DATA_NEW
 
