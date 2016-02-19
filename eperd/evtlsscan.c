@@ -203,22 +203,15 @@ static void free_child_cb(int unused  UNUSED_PARAM, const short event UNUSED_PAR
 
 
 	if (qry->bev != NULL && qry->tls_incomplete){
-		bufferevent_free(qry->bev);
+		bufferevent_free(qry->bev); /* this will call SSL_free;
+					       SSL_free(qry->ssl); */
 		qry->bev = NULL;
 	}
-
-	/* 
-	if(qry->ssl != NULL) {
-		SSL_free(qry->ssl);
-		qry->ssl = NULL;
-	}
-	*/
 
 	if(qry->ssl_ctx !=  NULL) {
 		SSL_CTX_free(qry->ssl_ctx);
 		qry->ssl_ctx = NULL;
 	}
-	evtimer_del(&qry->timeout_ev);
 }
 
 static void ssl_gc_init(struct tls_child *qry)
@@ -553,7 +546,6 @@ static void write_full_res(struct tls_child *qry)
 
 static void print_tls_resp(struct tls_child *qry, bool is_err) {
 
-	bool write_out = FALSE;
 	struct timeval asap = { 0, 1 };
 	struct tls_state *pqry = qry->p;
 
@@ -571,26 +563,21 @@ static void print_tls_resp(struct tls_child *qry, bool is_err) {
 	evtimer_add(&qry->free_child_ev, &asap);
 
 	if (qry->p->active < 1) {
-		write_out = TRUE;
-	}
-	else {
-		crondlog_aa(LVL5, "waiting for more %d queries", qry->p->active);
-	}
-
-	if(write_out) {
-		if (qry->p->done) /* call the done function */
-			evtimer_add(&qry->p->done_ev, &asap);
 		if(qry->p->opt_sum) {
 			write_full_res(qry);
 		} else {
 			write_full_res(qry);
 		}
+
+		evtimer_add(&pqry->free_inst_ev, &asap);
+
+		if (qry->p->done) /* call the done function */
+			evtimer_add(&qry->p->done_ev, &asap);
 	}
 	else {
 		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
 				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
 	}
-	evtimer_add(&pqry->free_inst_ev, &asap);
 }
 
 int tlsscan_delete (void *st)
@@ -874,6 +861,7 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
 		buf_add(&qry->err, line, strlen(line));
 		print_tls_resp(qry, TRUE);
+		qry->ssl = NULL; /* I think SSL object is cleaned up after the error ??? */
 		return;
 	}
 
