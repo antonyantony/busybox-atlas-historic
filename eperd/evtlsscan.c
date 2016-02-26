@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 RIPE NCC <atlas@ripe.net>
+ * Copyright (c) 2014 - 2016 RIPE NCC <atlas@ripe.net>
  * Licensed under GPLv2 or later, see file LICENSE in this tarball for details.
  */
 
@@ -40,6 +40,8 @@
 #define STATUS_FREE 0
 #define STATUS_START 1001
 
+enum output_format {OUTPUT_FMT_NO_CERTS, OUTPUT_FMT_CERTS_ARRAY, OUTPUT_FMT_CERTS_FULL};
+
 enum readstate { READ_FIRST, READ_STATUS, READ_HEADER, READ_BODY, READ_SIMPLE,
 	READ_CHUNKED, READ_CHUNK_BODY, READ_CHUNK_END,
 	READ_CHUNKED_TRAILER,
@@ -54,55 +56,54 @@ struct tls_base {
 
 static void crondlog_aa(const char *ctl, char *fmt, ...);
 
-
-struct rsum {
-	struct rsum *next;
-	struct buf *result;
-};
-
-/* How to keep track of each user tlsscan query aka pqry */
+/* 
+ * this parent state, or user query one per user input.
+ * Child query and Grand children are the actual queries 
+ */
 struct tls_state {
 	char *host;
 	int state;
-	int q_serial;  /* on parent it is the total queries sent */
+	int q_serial;  /* on the parent, keep count of queries sent */
 	int q_done;
 	int q_success;
 
-	/* all children share same result and err structure as parent */
+	/* all children share same result, ccbuf structure with the parent */
 	struct buf err;
 	struct buf result;
-	struct rsum  *rsums; /* head of linked list on the parent query */
-	struct result_ip *res_head;
+	struct buf ccbuf;  /* certificate chain, appended to the result */
+	struct buf pcbuf;  /* peer certificate, appended to the result */
 
 	struct evutil_addrinfo *addr;
-	struct timeval start_time;
-	struct event free_inst_ev;
+	struct timeval start_time; /* start time of the parent query */
+	struct event free_inst_ev; /* event to free the parent query */
 
-	char *port;
+	char *port; /* port as character string "443"*/
 	char do_get;
 	char do_head;
 	char do_http10;
 	char *user_agent;
 	char *path;
 
-	int dns_count; /* resolved addresses to query */
-	struct timeval timeout_tv;
+	int dns_count; /* resolved addresses to pquery */
 
-	int active; /* how many pending additional quries per query */
+	int active; /* pending additional quries per user query */
 	int retry;
 
-	bool opt_sum;
-	bool opt_certs;
+	int opt_out_format;
 	int opt_retry_max;
 	int opt_ignore_cert;
 
 	int opt_v4;
 	int opt_v6;
+	struct evutil_addrinfo hints;
+
 	int opt_max_con; /* maximum concurrent queries per destination */
 	int opt_max_bytes; /*  max size of output buffer */
 
 	bool opt_all_tests;
 
+	struct timeval timeout_tv; /* time out per child query in TV */
+	int opt_timeout; /* user input in seconds */
 	int opt_ssl_v3;
 	int opt_tls_v1;
 	int opt_tls_v11;
@@ -110,21 +111,18 @@ struct tls_state {
 	char *out_filename;
 	char *str_Atlas; /* option but without opt_ prefix. Historic */
 
-	struct tls_child *c;
-	struct evutil_addrinfo hints;
+	struct tls_child *c; 
 	struct event done_ev;
-	void (*done)(void *state);
+	void (*done)(void *state); /* call back when all queries are done */
 };
 
 struct tls_child {
 	/* per instance variables. Unshared after duplicate */
 	struct tls_child *next;
-	int serial;  /* serial number of each additional query. First is zero */
+	int serial;  /* serial number of each additional query. Start at zero */
 
-	struct tls_state *p; /* parent object */
-	struct buf *result; /* all children share same result structure as parent */
-	struct rsum  *rs; /* local to this query */
-
+	struct tls_state *p; /* parent object pqry*/
+	struct buf *result; /* points to parent's result */
 	struct buf err;
 
 	SSL_CTX *ssl_ctx;
@@ -142,10 +140,10 @@ struct tls_child {
 
 	struct event timeout_ev;
 	struct event free_child_ev;
-	bool is_gc;
+	bool is_gc; /* is grand children? same destination (IP) with different ssl option */
 	bool tls_incomplete;
-	enum readstate readstate;
-	enum writestate writestate;
+	enum readstate readstate; /* httpget */
+	enum writestate writestate; /* httpget */
 	struct sockaddr_in6 loc_sin6;
 	socklen_t loc_socklen;
 	char addrstr[INET6_ADDRSTRLEN];
@@ -164,6 +162,8 @@ static char line[(DEFAULT_LINE_LENGTH+1)];
 static struct option longopts[]=
 {
 	{ "retry",  required_argument, NULL, O_RETRY },
+        { "timeout", required_argument, NULL, 'T' },
+	{ "port", required_argument, NULL, 'p'},
 };
 
 static void done_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h) {
@@ -262,25 +262,100 @@ static void ssl_gc_init(struct tls_child *qry)
 	SSL_free(ssl);
 }
 
-static void add_result_certs (struct tls_child *qry)
+static void atlas_cert_char_encode (struct buf *lbuf, BUF_MEM *bptr)
+{
+	int j;
+	char *c = (char *)bptr->data;
+
+	AS("\"cert\" : \"");
+	for (j  = 0; j < bptr->length;  j++) {
+		if (*c == '\n') {
+			AS("\\n");
+		}
+		else {
+			/* this could be more efficient ? */
+			buf_add(lbuf, c, 1);
+		}
+		c++;
+	}
+	AS("\"");
+}
+
+static void add_certs_to_array (struct tls_child *qry)
+{
+	int i;
+	struct buf *lbuf = &qry->p->ccbuf; /* careful with lbuf it is used by JSON Macros */
+	STACK_OF(X509) *sk = NULL;
+	X509 *peer = NULL;
+
+	if(qry->p->opt_out_format & OUTPUT_FMT_NO_CERTS)
+		return;
+
+	sk = SSL_get_peer_cert_chain(qry->ssl);
+	if(sk != NULL) {
+		for (i=0; i<sk_X509_num(sk); i++) {
+			X509* cert =  sk_X509_value(sk,i);
+			BUF_MEM *bptr;
+			BIO *b64 = BIO_new (BIO_s_mem());
+
+			PEM_write_bio_X509(b64, cert);
+			BIO_get_mem_ptr(b64, &bptr);
+
+			if (lbuf->size == 0) {
+				if (i == 0) {
+					AS(", \"cert_chain\" : [");
+				}
+			}
+			if ( i > 0 )
+				AS(", ");
+			AS("{");
+			JD(id , i);
+			atlas_cert_char_encode(lbuf, bptr);
+			BIO_free(b64);
+			unsigned char md[EVP_MAX_MD_SIZE];
+			const EVP_MD *fdig = EVP_sha1();
+			unsigned int n;
+			if (X509_digest(cert,fdig,md,&n))
+			{
+				AS(", \"fp\":");
+				int k;
+				char c3[4];
+				for (k=0; k<(int)n; k++)
+				{
+					snprintf(c3, sizeof(c3),"%02X%c",md[k],
+							(k+1 == (int)n) ?'\n':':');
+					AS(c3);
+
+				}
+			}
+			AS("}");
+		}
+	}
+
+	/*
+	peer=SSL_get_peer_certificate(qry->ssl);
+	if(peer !=  NULL) {
+
+	}
+	*/
+}
+static void add_certs_to_result (struct tls_child *qry)
 {
 	int i;
 	STACK_OF(X509) *sk;
 
-	if(!qry->p->opt_certs)
+	struct buf *lbuf = qry->result;
+
+	if(!(qry->p->opt_out_format & OUTPUT_FMT_NO_CERTS))
 		return;
 
-	sk = SSL_get_peer_cert_chain(qry->ssl);
-
-	if (sk == NULL)
+	if((sk = SSL_get_peer_cert_chain(qry->ssl)) == NULL)
 		return;
 
 	for (i=0; i<sk_X509_num(sk); i++) {
 		X509* cert =  sk_X509_value(sk,i);
 		BUF_MEM *bptr;
-		int j;
 		BIO *b64 = BIO_new (BIO_s_mem());
-		char *c; /* pointer to loop over */
 
 		PEM_write_bio_X509(b64, cert);
 		BIO_get_mem_ptr(b64, &bptr);
@@ -291,19 +366,8 @@ static void add_result_certs (struct tls_child *qry)
 			}
 			if ( i > 0 )
 				AS(", ");
-			AS("\"");
-			c =  bptr->data;
-			for (j  = 0; j < bptr->length;  j++) {
-				if (*c == '\n') {
-					AS("\\n");
-				}
-				else {
-					/* this could be more efficient ? */
-					buf_add(qry->result, c, 1);
-				}
-				c++;
-			}
-			AS("\"");
+			atlas_cert_char_encode(qry->result, bptr);
+			AS("}");
 		}
 	}
 	if ( i  > 0) {
@@ -314,6 +378,7 @@ static void add_result_certs (struct tls_child *qry)
 static void fmt_ssl_time(struct tls_child *qry)
 {
 	int lts =  -1 ; /*  get_timesync(); */ /* AA_FIXME */
+	struct buf *lbuf = qry->result;
 
 	JS1(time, %ld,  qry->start_time.tv_sec);
 	JD(lts,lts);
@@ -323,7 +388,7 @@ static void fmt_ssl_time(struct tls_child *qry)
 static void fmt_ssl_host(struct tls_child *qry, bool is_err)
 {
 	char addrstr[INET6_ADDRSTRLEN];
-        char dst_addr_str[(INET6_ADDRSTRLEN+1)];
+	struct buf *lbuf = qry->result;
 
 	if ((qry->addr_curr != NULL) && (qry->addrstr[0] !=  '\0')) {
 		if(strcmp(qry->addrstr, qry->p->host)) {
@@ -347,25 +412,27 @@ static void fmt_ssl_host(struct tls_child *qry, bool is_err)
 
 static void fmt_ssl_p_result(struct tls_child *qry)
 {
-		int lts =  -1 ; /*  get_timesync(); */ /* AA_FIXME */
-		int fw = get_atlas_fw_version();
+	int lts =  -1 ; /*  get_timesync(); */ /* AA_FIXME */
+	int fw = get_atlas_fw_version();
+	struct buf *lbuf = qry->result;
 
-		AS("RESULT { ");
-		if(qry->p->str_Atlas != NULL)
-		{
-			JS(id, qry->p->str_Atlas);
-		}
-		JD(fw, fw);
-		JD(dnscount, qry->p->dns_count);
-		JS1(time, %ld, qry->p->start_time.tv_sec);
-		JD(lts,lts); // fix me take lts when I create start time.
-		AS("\"resultset\" : [ {");
+	AS("RESULT { ");
+	if(qry->p->str_Atlas != NULL)
+	{
+		JS(id, qry->p->str_Atlas);
+	}
+	JD(fw, fw);
+	JD(dnscount, qry->p->dns_count);
+	JS1(time, %ld, qry->p->start_time.tv_sec);
+	JD(lts,lts); // fix me take lts when I create start time.
+	AS("\"resultset\" : [ {");
 
 }
 
 static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 {
 	int size = qry->result->size ;
+	struct buf *lbuf = qry->result;
 
 	if (size == 0){
 		AS ("{");
@@ -378,13 +445,12 @@ static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 		}
 		if (qry->sslv_str != NULL) {
 			AS (", ");
-			JS_NC(version, qry->sslv_str);
+			JS(version, qry->sslv_str);
 		}
 
 	}
 	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
 			(!qry->tls_incomplete)) {
-		int i;
 		qry->p->q_success++;
 		if (size == 0) {
 			AS (", \"ciphers\" : [");
@@ -402,13 +468,15 @@ static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
 			 */
 			ssl_gc_init(qry);
 		}
+		add_certs_to_array(qry);
 	}
 }
 
-static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
+static void fmt_ssl_cert_full_resp(struct tls_child *qry, bool is_err)
 {
 
-	/* if it is failed grand child qury do not print anything */
+	struct buf *lbuf = qry->result;
+	/* if it is a failed grand child qury nothing to print */
 	if (qry->is_gc && qry->tls_incomplete ){
 		if(qry->err.size)
 		{
@@ -417,7 +485,7 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 		return;
 	}
 
-	if (qry->result->size == 0){
+	if (qry->result->size == 0){ /* initialze the first parts RESULT */
 		fmt_ssl_p_result(qry);
 	}
 	else {
@@ -448,7 +516,7 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 		AS(",");
 		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
 
-		add_result_certs (qry);
+	 	add_certs_to_result(qry);
 
 		if ((qry->is_gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
 			/* this is a successful child. 
@@ -472,16 +540,17 @@ static void fmt_ssl_resp(struct tls_child *qry, bool is_err)
 	AS (" }"); //result
 }
 
-static void write_sum_res(struct tls_child *qry)
+
+static void write_results(struct tls_child *qry)
 {
 	FILE *fh;
+	struct buf *lbuf = qry->result;
 	/* end of result only JSON closing brackets from here on */
 	AS("]");  /* resultset : [{}..] */
 
-	AS (",");
+	AS (" ,");
 	JD(queries, qry->p->q_serial);
 	JD_NC(success, qry->p->q_success);
-	AS (" }\n");   /* RESULT { } . end of RESULT line */
 
 	if (qry->p->out_filename)
 	{
@@ -495,45 +564,14 @@ static void write_sum_res(struct tls_child *qry)
 		fh = stdout;
 
 	if (fh) {
-
-		struct rsum  *r; /* head of linked list on the parent query */
-		for (r = qry->p->rsums; (r != NULL); r = r->next) {
-			fwrite(r->result->buf, r->result->size, 1 , fh);
-		}
-		AS ("] "); /* ciphers [] */
-	}
-	buf_cleanup(qry->result);
-
-	if (qry->p->out_filename)
-		fclose(fh);
-
-	qry->p->state = STATUS_FREE;
-	qry->retry = 0;
-}
-static void write_full_res(struct tls_child *qry)
-{
-	FILE *fh;
-	/* end of result only JSON closing brackets from here on */
-	AS("]");  /* resultset : [{}..] */
-
-	AS (",");
-	JD(queries, qry->p->q_serial);
-	JD_NC(success, qry->p->q_success);
-	AS (" }\n");   /* RESULT { } . end of RESULT line */
-
-	if (qry->p->out_filename)
-	{
-		fh= fopen(qry->p->out_filename, "a");
-		if (!fh) {
-			crondlog(LVL8 "unable to append to '%s'",
-					qry->p->out_filename);
-		}
-	}
-	else
-		fh = stdout;
-
-	if (fh) {
+		char *closing = " }\n"; /* RESULT { } . end of RESULT line */
 		fwrite(qry->result->buf, qry->result->size, 1 , fh);
+		/* adds the certs directly fh, not to results to save doubling string memory */
+		if (qry->p->ccbuf.size > 0) {
+			fwrite(qry->p->ccbuf.buf, qry->p->ccbuf.size, 1 , fh);
+		}
+		fwrite(closing, strlen(closing), 1 , fh);
+
 	}
 	buf_cleanup(qry->result);
 
@@ -554,21 +592,16 @@ static void print_tls_resp(struct tls_child *qry, bool is_err) {
 
 	qry->p->q_done++;
 
-	if (qry->p->opt_sum) {
-		fmt_ssl_summary(qry, is_err);
+	if (qry->p->opt_out_format & OUTPUT_FMT_CERTS_FULL) {
+		fmt_ssl_cert_full_resp(qry, is_err);
 	} else {
-		fmt_ssl_resp(qry, is_err);
+		fmt_ssl_summary(qry, is_err);
 	}
 
 	evtimer_add(&qry->free_child_ev, &asap);
 
 	if (qry->p->active < 1) {
-		if(qry->p->opt_sum) {
-			write_full_res(qry);
-		} else {
-			write_full_res(qry);
-		}
-
+		write_results(qry);
 		evtimer_add(&pqry->free_inst_ev, &asap);
 
 		if (qry->p->done) /* call the done function */
@@ -580,6 +613,9 @@ static void print_tls_resp(struct tls_child *qry, bool is_err) {
 	}
 }
 
+//#define FREE_NN(p) (if ((p) != NULL) {free((p)); (p) = NULL;})
+
+
 int tlsscan_delete (void *st)
 {
 	struct tls_state *pqry = st;
@@ -589,10 +625,10 @@ int tlsscan_delete (void *st)
 	if (pqry->state )
 		return 0;
 
-	if (pqry->out_filename != NULL)
+	if(pqry->out_filename != NULL) 
 	{
 		free(pqry->out_filename);
-		pqry->out_filename = NULL ;
+		pqry->out_filename = NULL;
 	}
 
 	if( pqry->str_Atlas != NULL)
@@ -607,6 +643,11 @@ int tlsscan_delete (void *st)
 		pqry->host = NULL;
 	}
 
+	if (pqry->port != NULL)
+	{
+		free(pqry->host);
+		pqry->host = NULL;
+	}
 	return 1;
 }
 
@@ -901,10 +942,7 @@ static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 }
 static void write_cb(struct bufferevent *bev, void *ptr)
 {
-	int r;
 	struct evbuffer *output;
-	off_t cLength;
-	struct stat sb;
 	struct timeval endtime;
 	struct tls_child *qry = ptr;
 
@@ -922,7 +960,7 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 			qry->writestate= WRITE_HEADER;
 			continue;
 		case WRITE_HEADER:
-			output= bufferevent_get_output(bev);
+			output= bufferevent_get_output(bev); 
 			evbuffer_add_printf(output, "%s %s HTTP/1.%c\r\n",
 				qry->p->do_get ? "GET" :
 				qry->p->do_head ? "HEAD" : "POST", qry->p->path,
@@ -979,6 +1017,13 @@ static bool tls_arg_validate (int argc, char *argv[], struct tls_state *pqry )
 		pqry->opt_tls_v11 = TLS1_1_VERSION;
 		pqry-> opt_tls_v12 = TLS1_2_VERSION;
 	}
+
+	if ( pqry->opt_timeout > 0)
+		pqry->timeout_tv.tv_sec = pqry->opt_timeout;
+
+	if(pqry->port == NULL)
+		pqry->port = strdup("443");
+
 	return FALSE;
 }
 
@@ -1016,9 +1061,10 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->user_agent= "httpget for atlas.ripe.net";
 	pqry->path = "/";
 	pqry->done = done;
-	pqry->opt_all_tests = TRUE;
-	pqry->opt_sum = TRUE;
+	pqry->opt_all_tests = FALSE;
 	pqry->timeout_tv.tv_sec = 5;
+	pqry->opt_out_format = OUTPUT_FMT_CERTS_ARRAY;
+//	pqry->opt_out_format = OUTPUT_FMT_CERTS_FULL;
 
 	if (done != NULL)
 		evtimer_assign(&pqry->done_ev, EventBase, done_cb, pqry);
@@ -1041,6 +1087,20 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 			case 'O':
                                 pqry->out_filename = strdup(optarg);
                                 break;
+
+			case 'p':
+				pqry->port = strdup(optarg);
+				break;
+
+			case 'T' :
+				pqry->opt_timeout = strtoul(optarg, NULL, 10);
+				if ((pqry->opt_timeout <= 0) | (pqry->opt_timeout > 3600)) {
+                                        fprintf(stderr, "ERROR invalid timeout  "
+                                                        "-T %s ??.  1 - 3600 seconds\n", optarg);
+					tlsscan_delete(pqry);
+                                        return (0);
+                                }
+				break;
 		}
 	}
 
@@ -1072,16 +1132,7 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 		return FALSE;
 	}
 
-	if(qry->p->opt_sum) {
-		struct rsum *rs =  xzalloc(sizeof(struct rsum));
-		rs->next = qry->p->rsums;
-		qry->p->rsums = rs;
-		qry->result = xzalloc(sizeof(struct buf));
-		qry->rs = rs;
-	}
-	else {
-		qry->result = &pqry->result;
-	}
+	qry->result = &pqry->result;
 
 	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
 	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
@@ -1168,7 +1219,6 @@ static void printErrorQuick (struct tls_state *pqry)
 		fprintf(fh, "}");
 	}
 	fprintf(fh,"]}");
-
 
 	if (pqry->out_filename)
 		fclose(fh);
