@@ -287,6 +287,7 @@ static void add_certs_to_array (struct tls_child *qry)
 	struct buf *lbuf = &qry->p->ccbuf; /* careful with lbuf it is used by JSON Macros */
 	STACK_OF(X509) *sk = NULL;
 	X509 *peer = NULL;
+	char buf[(DEFAULT_LINE_LENGTH * 8)];  /* for subject, issuer */
 
 	if(qry->p->opt_out_format & OUTPUT_FMT_NO_CERTS)
 		return;
@@ -317,17 +318,24 @@ static void add_certs_to_array (struct tls_child *qry)
 			unsigned int n;
 			if (X509_digest(cert,fdig,md,&n))
 			{
-				AS(", \"fp\":");
+				AS(", \"fp\" : ");
 				int k;
 				char c3[4];
 				for (k=0; k<(int)n; k++)
 				{
 					snprintf(c3, sizeof(c3),"%02X%c",md[k],
-							(k+1 == (int)n) ?'\n':':');
+							(k+1 == (int)n) ? '"' : ':');
 					AS(c3);
 
 				}
+				AS(",");
 			}
+			X509_NAME_oneline(X509_get_subject_name(cert),
+					buf,sizeof(buf));
+			JS(subject, buf);
+			X509_NAME_oneline(X509_get_issuer_name(cert),
+					buf,sizeof (buf));
+			JS(issuer, buf);
 			AS("}");
 		}
 	}
