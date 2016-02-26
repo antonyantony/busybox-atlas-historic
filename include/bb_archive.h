@@ -77,6 +77,9 @@ typedef struct archive_handle_t {
 	off_t offset;
 
 	/* Archiver specific. Can make it a union if it ever gets big */
+#if ENABLE_FEATURE_TAR_LONG_OPTIONS
+	unsigned tar__strip_components;
+#endif
 #define PAX_NEXT_FILE 0
 #define PAX_GLOBAL    1
 #if ENABLE_TAR || ENABLE_DPKG || ENABLE_DPKG_DEB
@@ -95,6 +98,7 @@ typedef struct archive_handle_t {
 #endif
 #if ENABLE_CPIO || ENABLE_RPM2CPIO || ENABLE_RPM
 	uoff_t cpio__blocks;
+	struct bb_uidgid_t cpio__owner;
 	struct hardlinks_t *cpio__hardlinks_to_create;
 	struct hardlinks_t *cpio__created_hardlinks;
 #endif
@@ -158,6 +162,8 @@ struct BUG_tar_header {
 	char c[sizeof(tar_header_t) == TAR_BLOCK_SIZE ? 1 : -1];
 };
 
+
+extern const char cpio_TRAILER[];
 
 
 archive_handle_t *init_handle(void) FAST_FUNC;

@@ -20,6 +20,7 @@
 #include <netdb.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <paths.h>
 #if defined __UCLIBC__ /* TODO: and glibc? */
 /* use inlined versions of these: */
 # define sigfillset(s)    __sigfillset(s)
@@ -106,7 +107,11 @@
 #  define updwtmpx updwtmp
 #  define _PATH_UTMPX _PATH_UTMP
 # else
+#  include <utmp.h>
 #  include <utmpx.h>
+#  if defined _PATH_UTMP && !defined _PATH_UTMPX
+#   define _PATH_UTMPX _PATH_UTMP
+#  endif
 # endif
 #endif
 #if ENABLE_LOCALE_SUPPORT
@@ -699,6 +704,7 @@ int bb_putchar(int ch) FAST_FUNC;
 /* Note: does not use stdio, writes to fd 2 directly */
 int bb_putchar_stderr(char ch) FAST_FUNC;
 char *xasprintf(const char *format, ...) __attribute__ ((format(printf, 1, 2))) FAST_FUNC RETURNS_MALLOC;
+char *auto_string(char *str) FAST_FUNC;
 // gcc-4.1.1 still isn't good enough at optimizing it
 // (+200 bytes compared to macro)
 //static ALWAYS_INLINE
@@ -926,14 +932,13 @@ long xuname2uid(const char *name) FAST_FUNC;
 long xgroup2gid(const char *name) FAST_FUNC;
 /* wrapper: allows string to contain numeric uid or gid */
 unsigned long get_ug_id(const char *s, long FAST_FUNC (*xname2id)(const char *)) FAST_FUNC;
-/* from chpst. Does not die, returns 0 on failure */
 struct bb_uidgid_t {
 	uid_t uid;
 	gid_t gid;
 };
-/* always sets uid and gid */
-int get_uidgid(struct bb_uidgid_t*, const char*, int numeric_ok) FAST_FUNC;
-/* always sets uid and gid, allows numeric; exits on failure */
+/* always sets uid and gid; returns 0 on failure */
+int get_uidgid(struct bb_uidgid_t*, const char*) FAST_FUNC;
+/* always sets uid and gid; exits on failure */
 void xget_uidgid(struct bb_uidgid_t*, const char*) FAST_FUNC;
 /* chown-like handling of "user[:[group]" */
 void parse_chown_usergroup_or_die(struct bb_uidgid_t *u, char *user_group) FAST_FUNC;
@@ -1134,9 +1139,8 @@ enum {
 extern const char *msg_eol;
 extern smallint syslog_level;
 extern smallint logmode;
-extern int die_sleep;
 extern uint8_t xfunc_error_retval;
-extern jmp_buf die_jmp;
+extern void (*die_func)(void);
 extern void xfunc_die(void) NORETURN FAST_FUNC;
 extern void bb_show_usage(void) NORETURN FAST_FUNC;
 extern void bb_error_msg(const char *s, ...) __attribute__ ((format (printf, 1, 2))) FAST_FUNC;
@@ -1258,7 +1262,8 @@ char *bb_ask_stdin(const char * prompt) FAST_FUNC;
 char *bb_ask(const int fd, int timeout, const char * prompt) FAST_FUNC;
 int bb_ask_confirmation(void) FAST_FUNC;
 
-int bb_parse_mode(const char* s, mode_t* theMode) FAST_FUNC;
+/* Returns -1 if input is invalid. current_mode is a base for e.g. "u+rw" */
+int bb_parse_mode(const char* s, unsigned cur_mode) FAST_FUNC;
 
 /*
  * Config file parser
@@ -1340,11 +1345,6 @@ extern void selinux_preserve_fcontext(int fdesc) FAST_FUNC;
 extern void selinux_or_die(void) FAST_FUNC;
 
 
-/* systemd support */
-#define SD_LISTEN_FDS_START 3
-int sd_listen_fds(void);
-
-
 /* setup_environment:
  * if chdir pw->pw_dir: ok: else if to_tmp == 1: goto /tmp else: goto / or die
  * if clear_env = 1: cd(pw->pw_dir), clear environment, then set
@@ -1411,6 +1411,7 @@ extern void print_login_prompt(void) FAST_FUNC;
 char *xmalloc_ttyname(int fd) FAST_FUNC RETURNS_MALLOC;
 /* NB: typically you want to pass fd 0, not 1. Think 'applet | grep something' */
 int get_terminal_width_height(int fd, unsigned *width, unsigned *height) FAST_FUNC;
+int get_terminal_width(int fd) FAST_FUNC;
 
 int tcsetattr_stdin_TCSANOW(const struct termios *tp) FAST_FUNC;
 
@@ -1792,7 +1793,7 @@ extern const char bb_msg_can_not_create_raw_socket[] ALIGN1;
 extern const char bb_msg_perm_denied_are_you_root[] ALIGN1;
 extern const char bb_msg_you_must_be_root[] ALIGN1;
 extern const char bb_msg_requires_arg[] ALIGN1;
-extern const char bb_msg_invalid_arg[] ALIGN1;
+extern const char bb_msg_invalid_arg_to[] ALIGN1;
 extern const char bb_msg_standard_input[] ALIGN1;
 extern const char bb_msg_standard_output[] ALIGN1;
 
@@ -1907,6 +1908,7 @@ extern const char bb_default_login_shell[] ALIGN1;
 
 
 #define ARRAY_SIZE(x) ((unsigned)(sizeof(x) / sizeof((x)[0])))
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
 
 
 /* We redefine ctype macros. Unicode-correct handling of char types

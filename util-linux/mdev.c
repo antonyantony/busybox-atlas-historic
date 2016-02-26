@@ -400,13 +400,13 @@ static void parse_next_rule(void)
 		}
 
 		/* 2nd field: uid:gid - device ownership */
-		if (get_uidgid(&G.cur_rule.ugid, tokens[1], /*allow_numeric:*/ 1) == 0) {
+		if (get_uidgid(&G.cur_rule.ugid, tokens[1]) == 0) {
 			bb_error_msg("unknown user/group '%s' on line %d", tokens[1], G.parser->lineno);
 			goto next_rule;
 		}
 
 		/* 3rd field: mode - device permissions */
-		bb_parse_mode(tokens[2], &G.cur_rule.mode);
+		G.cur_rule.mode = bb_parse_mode(tokens[2], G.cur_rule.mode);
 
 		/* 4th field (opt): ">|=alias" or "!" to not create the node */
 		val = tokens[3];
