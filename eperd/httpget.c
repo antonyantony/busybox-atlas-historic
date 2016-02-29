@@ -118,7 +118,7 @@ struct hgstate
 	int subid;
 	int submax;
 	time_t gstart;
-	struct timeval start;
+	struct timespec start;
 	double resptime;
 	double ttr;		/* Time to resolve */
 	double ttc;		/* Time to connect */
@@ -354,9 +354,11 @@ static void timeout_callback(int __attribute((unused)) unused,
 #if 1
 		snprintf(errline, sizeof(errline), 
 			DBQ(err) ":"
-	DBQ(timeout reading chunk: state %d linelen %d lineoffset %d)
+	DBQ(timeout reading chunk: state %ld linelen %ld lineoffset %ld)
 			", ",
-			state->readstate, state->linelen, state->lineoffset);
+			(long)state->readstate,
+			(long)state->linelen,
+			(long)state->lineoffset);
 		add_str(state, errline);
 #else
 		add_str(state, DBQ(err) ":" DBQ(timeout reading chunk) ", ");
@@ -867,7 +869,7 @@ static int get_input(struct hgstate *state)
 {
 	int n;
 	double t;
-	struct timeval endtime;
+	struct timespec endtime;
 	char line[80];
 
 	/* Assume that we always end up with a full buffer anyway */
@@ -901,9 +903,9 @@ static int get_input(struct hgstate *state)
 
 	if (state->etim >= 2 && state->report_roffset)
 	{
-		gettimeofday(&endtime, NULL);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
 		t= (endtime.tv_sec-state->start.tv_sec)*1e3 +
-			(endtime.tv_usec-state->start.tv_usec)/1e3;
+			(endtime.tv_nsec-state->start.tv_nsec)/1e6;
 		if (state->roffset != 0)
 			add_str2(state, ",");
 		snprintf(line, sizeof(line),
@@ -1026,7 +1028,7 @@ static void readcb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 	char *cp, *ncp, *check, *line;
 	const char *prefix, *kw;
 	struct hgstate *state;
-	struct timeval endtime;
+	struct timespec endtime;
 
 	state= ENV2STATE(ptr);
 
@@ -1054,10 +1056,10 @@ static void readcb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 		switch(state->readstate)
 		{
 		case READ_FIRST:
-			gettimeofday(&endtime, NULL);
+			clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
 			state->ttfb= (endtime.tv_sec-
 				state->start.tv_sec)*1e3 +
-				(endtime.tv_usec-state->start.tv_usec)/1e3;
+				(endtime.tv_nsec-state->start.tv_nsec)/1e6;
 			state->readstate= READ_STATUS;
 			state->roffset= 0;
 			if (state->etim >= 2)
@@ -1558,12 +1560,12 @@ static void readcb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 			if (state->bev)
 			{
 				state->bev= NULL;
-				gettimeofday(&endtime, NULL);
+				clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
 				state->resptime=
 					(endtime.tv_sec-
 					state->start.tv_sec)*1e3 +
-					(endtime.tv_usec-
-					state->start.tv_usec)/1e3;
+					(endtime.tv_nsec-
+					state->start.tv_nsec)/1e6;
 				report(state);
 			}
 			return;
@@ -1620,7 +1622,7 @@ static void writecb(struct bufferevent *bev, void *ptr)
 	struct evbuffer *output;
 	off_t cLength;
 	struct stat sb;
-	struct timeval endtime;
+	struct timespec endtime;
 
 	state= ENV2STATE(ptr);
 
@@ -1629,10 +1631,10 @@ static void writecb(struct bufferevent *bev, void *ptr)
 		switch(state->writestate)
 		{
 		case WRITE_FIRST:
-			gettimeofday(&endtime, NULL);
+			clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
 			state->ttc= (endtime.tv_sec-
 				state->start.tv_sec)*1e3 +
-				(endtime.tv_usec-state->start.tv_usec)/1e3;
+				(endtime.tv_nsec-state->start.tv_nsec)/1e6;
 			state->writestate= WRITE_HEADER;
 			continue;
 		case WRITE_HEADER:
@@ -1734,7 +1736,7 @@ static void writecb(struct bufferevent *bev, void *ptr)
 
 static void err_reading(struct hgstate *state)
 {
-	struct timeval endtime;
+	struct timespec endtime;
 
 	switch(state->readstate)
 	{
@@ -1763,9 +1765,9 @@ static void err_reading(struct hgstate *state)
 			add_str(state, DBQ(err) ":" DBQ(error reading body)
 				", ");
 		}
-		gettimeofday(&endtime, NULL);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
 		state->resptime= (endtime.tv_sec-state->start.tv_sec)*1e3 +
-			(endtime.tv_usec-state->start.tv_usec)/1e3;
+			(endtime.tv_nsec-state->start.tv_nsec)/1e6;
 		report(state);
 		break;
 	default:
@@ -1786,7 +1788,7 @@ static void beforeconnect(struct tu_env *env,
 	struct sockaddr *addr, socklen_t addrlen)
 {
 	struct hgstate *state;
-	struct timeval endtime;
+	struct timespec endtime;
 
 	state= ENV2STATE(env);
 
@@ -1812,12 +1814,12 @@ static void beforeconnect(struct tu_env *env,
 
 	if (state->first_connect)
 	{
-		gettimeofday(&endtime, NULL);
+		clock_gettime(CLOCK_MONOTONIC_RAW, &endtime);
 		state->ttr= (endtime.tv_sec-state->start.tv_sec)*1e3 +
-			(endtime.tv_usec-state->start.tv_usec)/1e3;
+			(endtime.tv_nsec-state->start.tv_nsec)/1e6;
 		state->first_connect= 0;
 	}
-	gettimeofday(&state->start, NULL);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &state->start);
 }
 
 
@@ -1867,6 +1869,13 @@ static void reporterr(struct tu_env *env, enum tu_err cause,
 		report(state);
 		break;
 
+	case TU_BAD_ADDR:
+		add_str(state, "{ " DBQ(error) ": "
+			DBQ(address not allowed) " }");
+		state->dnserr= 1;
+		report(state);
+		break;
+
 	default:
 		crondlog(DIE9 "reporterr: bad cause %d", cause);
 	}
@@ -1908,7 +1917,7 @@ static void httpget_start(void *state)
 	hgstate->readstate= READ_STATUS;
 	hgstate->writestate= WRITE_HEADER;
 	hgstate->gstart= time(NULL);
-	gettimeofday(&hgstate->start, NULL);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &hgstate->start);
 	hgstate->first_connect= 1;
 
 	memset(&hints, '\0', sizeof(hints));
