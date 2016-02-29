@@ -7,6 +7,13 @@ menu "Atlas eperd"
 
 INSERT
 
+config ATLAS_ADDRESS_CHECK
+	bool "Atlas IP address check."
+	default y
+	help
+		If enabled atlas eperd tools will not allow private 
+		IP addresses, most of RFC1918.
+
 config EOOQD
 	bool "Eooqd"
 	default n
