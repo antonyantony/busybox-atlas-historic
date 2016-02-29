@@ -433,21 +433,6 @@ config MT
 	  to advance or rewind a tape past a specified number of archive
 	  files on the tape.
 
-config PERD
-	bool "perd"
-	default n
-	select FEATURE_SUID
-	select FEATURE_SYSLOG
-	help
-	  Perd periodically runs Atlas measurements. It is based on crond.
-
-config FEATURE_PERD_D
-	bool "Support option -d to redirect output to stderr"
-	depends on PERD
-	default n
-	help
-	 -d sets loglevel to 0 (most verbose) and directs all output to stderr.
-
 config RAIDAUTORUN
 	bool "raidautorun"
 	default y
