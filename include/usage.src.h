@@ -137,10 +137,6 @@ INSERT
 "\n                             system time if it exceeds bound (in seconds)" \
 "\n     -O FILE                 Write the body of the HTTP reply to FILE"
 
-#define perd_trivial_usage \
-       "-fbSAD -P pidfile -l N " IF_FEATURE_CROND_D("-d N ") "-L LOGFILE -c DIR"
-#define perd_full_usage "\n\n" \
-
 #define rptra6_trivial_usage \
 
 #define rptra6_full_usage "\n\n" \
