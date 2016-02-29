@@ -143,7 +143,7 @@ struct trtstate
 	struct evutil_addrinfo *dns_curr;
 
 	time_t starttime;
-	struct timeval xmit_time;
+	struct timespec xmit_time;
 
 	struct event timer;
 
@@ -186,7 +186,7 @@ struct v6info
 	uint32_t pid;
 	uint32_t id;
 	uint32_t seq;
-	struct timeval tv;
+	struct timespec tv;
 };
 
 static int create_socket(struct trtstate *state, int do_tcp);
@@ -521,7 +521,7 @@ static void send_pkt(struct trtstate *state)
 	}
 	state->seq++;
 
-	gettimeofday(&state->xmit_time, NULL);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &state->xmit_time);
 
 	if (state->sin6.sin6_family == AF_INET6)
 	{
@@ -1363,11 +1363,12 @@ static void ready_callback4(int __attribute((unused)) unused,
 	struct tcphdr *etcp;
 	struct udphdr *eudp;
 	double ms;
-	struct timeval now, interval;
+	struct timespec now;
+	struct timeval interval;
 	struct sockaddr_in remote;
 	char line[80];
 
-	gettimeofday(&now, NULL);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
 	state= s;
 	base= state->base;
@@ -1511,7 +1512,7 @@ static void ready_callback4(int __attribute((unused)) unused,
 				state->last_response_hop= state->hop;
 
 			ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-				(now.tv_usec-state->xmit_time.tv_usec)/1e3;
+				(now.tv_nsec-state->xmit_time.tv_nsec)/1e6;
 
 			snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
 				(late || isDup) ? ", " : "",
@@ -1725,7 +1726,7 @@ printf("curpacksize: %d\n", state->curpacksize);
 				state->last_response_hop= state->hop;
 
 			ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-				(now.tv_usec-state->xmit_time.tv_usec)/1e3;
+				(now.tv_nsec-state->xmit_time.tv_nsec)/1e6;
 
 			snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
 				(late || isDup) ? ", " : "",
@@ -1953,7 +1954,7 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 				state->last_response_hop= state->hop;
 
 			ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-				(now.tv_usec-state->xmit_time.tv_usec)/1e3;
+				(now.tv_nsec-state->xmit_time.tv_nsec)/1e6;
 
 			snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
 				(late || isDup) ? ", " : "",
@@ -2224,7 +2225,7 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 		}
 
 		ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-			(now.tv_usec-state->xmit_time.tv_usec)/1e3;
+			(now.tv_nsec-state->xmit_time.tv_nsec)/1e6;
 
 		snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
 			(late || isDup) ? ", " : "",
@@ -2279,12 +2280,52 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 	}
 }
 
+static void report_hdropts(struct trtstate *state, unsigned char *s, 
+	unsigned char *e)
+{
+	int o, len, mss;
+	unsigned char *orig_s;
+	char line[80];
+
+	add_str(state, ", " DBQ(hdropts) ": [ ");
+	orig_s= s;
+	while (s<e)
+	{
+		o= *s;
+		switch(o)
+		{
+		case 2:
+			len= s[1];
+			if (len < 4 || s+len > e)
+			{
+				printf("report_hdropts: bad option\n");
+				break;
+			}
+			mss= (s[2] << 8) | s[3];
+			snprintf(line, sizeof(line),
+				"%s{ " DBQ(mss) ":%d }",
+				s != orig_s ? ", " : "", mss);
+			add_str(state, line);
+			s += len;
+			continue;
+		default:
+			snprintf(line, sizeof(line),
+				"%s{ " DBQ(unknown-opt) ":%d }",
+				s != orig_s ? ", " : "", o);
+			add_str(state, line);
+			break;
+		}
+		break;
+	}
+	add_str(state, " ]");
+}
+
 static void ready_tcp4(int __attribute((unused)) unused,
 	const short __attribute((unused)) event, void *s)
 {
 	uint16_t myport;
 	socklen_t slen;
-	int hlen, late, isDup;
+	int hlen, late, isDup, tcp_hlen;
 	unsigned ind, seq;
 	ssize_t nrecv;
 	struct trtbase *base;
@@ -2292,12 +2333,13 @@ static void ready_tcp4(int __attribute((unused)) unused,
 	struct ip *ip;
 	double ms;
 	struct tcphdr *tcphdr;
+	unsigned char *e, *p;
 	struct sockaddr_in remote;
-	struct timeval now;
+	struct timespec now;
 	struct timeval interval;
 	char line[80];
 
-	gettimeofday(&now, NULL);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
 	state= s;
 	base= state->base;
@@ -2323,6 +2365,14 @@ static void ready_tcp4(int __attribute((unused)) unused,
 	}
 
 	tcphdr= (struct tcphdr *)(base->packet+hlen);
+
+	tcp_hlen= tcphdr->doff * 4;
+	if (nrecv < hlen + tcp_hlen || tcphdr->doff < 5)
+	{
+		/* Short packet */
+		printf("ready_tcp4: too short %d\n", (int)nrecv);
+		return;
+	}
 
 	/* Quick check if the port is in range */
 	myport= ntohs(tcphdr->dest);
@@ -2390,7 +2440,7 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 	}
 
 	ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-		(now.tv_usec-state->xmit_time.tv_usec)/1e3;
+		(now.tv_nsec-state->xmit_time.tv_nsec)/1e6;
 
 	snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
 		(late || isDup) ? ", " : "",
@@ -2407,6 +2457,13 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 		(tcphdr->ack ? "A" : ""),
 		(tcphdr->urg ? "U" : ""));
 	add_str(state, line);
+
+	if (tcp_hlen > sizeof(*tcphdr))
+	{
+		p= (unsigned char *)&tcphdr[1];
+		e= ((unsigned char *)tcphdr) + tcp_hlen;
+		report_hdropts(state, p, e);
+	}
 
 	if (!late)
 	{
@@ -2447,25 +2504,26 @@ static void ready_tcp6(int __attribute((unused)) unused,
 	const short __attribute((unused)) event, void *s)
 {
 	uint16_t myport;
-	int late, isDup, rcvdttl;
+	int late, isDup, rcvdttl, tcp_hlen;
 	unsigned ind, seq;
 	ssize_t nrecv;
 	struct trtbase *base;
 	struct trtstate *state;
 	double ms;
+	unsigned char *e, *p;
 	struct tcphdr *tcphdr;
 	struct cmsghdr *cmsgptr;
 	struct msghdr msg;
 	struct iovec iov[1];
 	struct sockaddr_in6 remote;
 	struct in6_addr dstaddr;
-	struct timeval now;
+	struct timespec now;
 	struct timeval interval;
 	char buf[INET6_ADDRSTRLEN];
 	char line[80];
 	char cmsgbuf[256];
 
-	gettimeofday(&now, NULL);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
 	state= s;
 	base= state->base;
@@ -2509,6 +2567,14 @@ static void ready_tcp6(int __attribute((unused)) unused,
 	}
 
 	tcphdr= (struct tcphdr *)(base->packet);
+
+	tcp_hlen= tcphdr->doff * 4;
+	if (nrecv < tcp_hlen || tcphdr->doff < 5)
+	{
+		/* Short packet */
+		printf("ready_tcp6: too short %d\n", (int)nrecv);
+		return;
+	}
 
 	/* Quick check if the port is in range */
 	myport= ntohs(tcphdr->dest);
@@ -2574,7 +2640,7 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 	}
 
 	ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-		(now.tv_usec-state->xmit_time.tv_usec)/1e3;
+		(now.tv_nsec-state->xmit_time.tv_nsec)/1e6;
 
 	snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
 		(late || isDup) ? ", " : "",
@@ -2591,6 +2657,14 @@ printf("got seq %d, expected %d\n", seq, state->seq);
 		(tcphdr->ack ? "A" : ""),
 		(tcphdr->urg ? "U" : ""));
 	add_str(state, line);
+
+	if (tcp_hlen > sizeof(*tcphdr))
+	{
+		p= (unsigned char *)&tcphdr[1];
+		e= ((unsigned char *)tcphdr) + tcp_hlen;
+		report_hdropts(state, p, e);
+	}
+
 	if (!late)
 	{
 		snprintf(line, sizeof(line), ", \"rtt\":%.3f", ms);
@@ -2645,7 +2719,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 	struct cmsghdr *cmsgptr;
 	void *ptr;
 	double ms;
-	struct timeval now;
+	struct timespec now;
 	struct sockaddr_in6 remote;
 	struct in6_addr dstaddr;
 	struct msghdr msg;
@@ -2655,7 +2729,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 	char line[80];
 	char cmsgbuf[256];
 
-	gettimeofday(&now, NULL);
+	clock_gettime(CLOCK_MONOTONIC_RAW, &now);
 
 	state= s;
 	base= state->base;
@@ -3016,14 +3090,13 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 			if (!late)
 			{
 				ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-					(now.tv_usec-state->xmit_time.tv_usec)/
-					1e3;
+					(now.tv_nsec-state->xmit_time.tv_nsec)/
+					1e6;
 			}
 			else if (v6info)
 			{
 				ms= (now.tv_sec-v6info->tv.tv_sec)*1000 +
-					(now.tv_usec-v6info->tv.tv_usec)/
-					1e3;
+					(now.tv_nsec-v6info->tv.tv_nsec)/1e6;
 			}
 
 			snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
@@ -3296,14 +3369,12 @@ printf("%s, %d: sin6_family = %d\n", __FILE__, __LINE__, state->sin6.sin6_family
 		if (!late)
 		{
 			ms= (now.tv_sec-state->xmit_time.tv_sec)*1000 +
-				(now.tv_usec-state->xmit_time.tv_usec)/
-				1e3;
+				(now.tv_nsec-state->xmit_time.tv_nsec)/1e6;
 		}
 		else
 		{
 			ms= (now.tv_sec-v6info->tv.tv_sec)*1000 +
-				(now.tv_usec-v6info->tv.tv_usec)/
-				1e3;
+				(now.tv_nsec-v6info->tv.tv_nsec)/1e6;
 		}
 
 		snprintf(line, sizeof(line), "%s\"from\":\"%s\"",
@@ -3511,6 +3582,12 @@ for (i= 0; argv[i] != NULL; i++)
 			free(lsa);
 			return NULL;
 		}
+
+		if (atlas_check_addr(&lsa->u.sa, lsa->len) == -1)
+		{
+			free(lsa);
+			return NULL;
+		}
 	}
 	else
 	{
@@ -3548,6 +3625,8 @@ for (i= 0; argv[i] != NULL; i++)
 	state->result= NULL;
 	state->reslen= 0;
 	state->resmax= 0;
+	state->socket_icmp= -1;
+	state->socket_tcp= -1;
 
 	for (i= 0; i<trt_base->tabsiz; i++)
 	{
@@ -3864,7 +3943,7 @@ static int create_socket(struct trtstate *state, int do_tcp)
 
 static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 {
-	int count;
+	int r, count;
 	struct trtstate *env;
 	struct evutil_addrinfo *cur;
 	char line[160];
@@ -3915,6 +3994,24 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 			continue;	/* Weird */
 		memcpy(&env->sin6, env->dns_curr->ai_addr,
 			env->socklen);
+
+		r= atlas_check_addr((struct sockaddr *)&env->sin6,
+			env->socklen);
+		if (r == -1)
+		{
+			if (env->result) free(env->result);
+			env->resmax= 80;
+			env->result= xmalloc(env->resmax);
+			env->reslen= 0;
+
+			env->starttime= time(NULL);
+			snprintf(line, sizeof(line),
+			"{ " DBQ(error) ":" DBQ(address not allowed) " }");
+			add_str(env, line);
+			env->dnsip= 1;
+			report(env);
+			return;
+		}
 
 		traceroute_start2(env);
 
