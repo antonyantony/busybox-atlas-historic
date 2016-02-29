@@ -57,23 +57,20 @@ struct tls_base {
 static void crondlog_aa(const char *ctl, char *fmt, ...);
 
 /* 
- * this parent state, or user query one per user input.
+ * this user query one per user input aka pqry
  * Child query and Grand children are the actual queries 
  */
 struct tls_state {
 	char *host;
 	int state;
-	int q_serial;  /* on the parent, keep count of queries sent */
-	int q_done;
+	int q_serial;  /* on the instance, keep count of queries sent */
 	int q_success;
 
-	/* all children share same result, ccbuf structure with the parent */
+	/* all children share same result structure with the  parent */
 	struct buf err;
 	struct buf result;
-	struct buf ccbuf;  /* certificate chain, appended to the result */
-	struct buf pcbuf;  /* peer certificate, appended to the result */
 
-	struct evutil_addrinfo *addr;
+	struct evutil_addrinfo *addr; /* there is only one on the pqry */
 	struct timeval start_time; /* start time of the parent query */
 	struct event free_inst_ev; /* event to free the parent query */
 
@@ -111,25 +108,36 @@ struct tls_state {
 	char *out_filename;
 	char *str_Atlas; /* option but without opt_ prefix. Historic */
 
-	struct tls_child *c; 
+	struct tls_qry *c; 
 	struct event done_ev;
 	void (*done)(void *state); /* call back when all queries are done */
 };
 
-struct tls_child {
-	/* per instance variables. Unshared after duplicate */
-	struct tls_child *next;
-	int serial;  /* serial number of each additional query. Start at zero */
+struct cert_fp {
+	unsigned char fp[EVP_MAX_MD_SIZE];
+	struct cert_fp *next;
+};
 
-	struct tls_state *p; /* parent object pqry*/
-	struct buf *result; /* points to parent's result */
+struct tls_qry {
+	/* per instance variables. Unshared after duplicate */
+	int serial;   /* serial number of this query. Start at zero on pqry */
+
+	struct tls_state *ui; /* pqry instace */
+	struct buf *result;  /* points to pqry.result */
+	struct buf *cc;   /* certificate chain, shared by grand children, appended to the result */
+ 	struct buf *ciphers_s_buf; /*list of ciphers that succeded shared with children */
+ 	struct buf *ciphers_e_buf; /* ciphers that succeded */
+ 	struct buf *certs; /* ciphers that succeded */
 	struct buf err;
+
+	struct cert_fp *cfps;
 
 	SSL_CTX *ssl_ctx;
 	SSL *ssl;
-	int sslv; /* version of child query from parent opt_ */
-	const char *sslv_str; /* string for sslv */
-	const char *cipher_list; /* for this child query */
+	int sslv; 			/* version of child query from parent opt_ */
+	const char *sslv_str; 		/* string for sslv */
+	const char *cipher_q; 		/* for this child query, what we are going to query */
+	const char *cipher_r; 		/* for this child query, what the response was */
 	struct bufferevent *bev;
 	struct evutil_addrinfo *addr_curr;
 
@@ -140,10 +148,12 @@ struct tls_child {
 
 	struct event timeout_ev;
 	struct event free_child_ev;
-	bool is_gc; /* is grand children? same destination (IP) with different ssl option */
+	bool is_c; 	/* is children? same destination (IP) with different ssl option */
+	int active_c; /* count of active children. delete parent when zero */ 
+	struct tls_qry *p ; /* parent query to same IP with all ciphers */
 	bool tls_incomplete;
-	enum readstate readstate; /* httpget */
-	enum writestate writestate; /* httpget */
+	enum readstate readstate; 	/* httpget */
+	enum writestate writestate; 	/* httpget */
 	struct sockaddr_in6 loc_sin6;
 	socklen_t loc_socklen;
 	char addrstr[INET6_ADDRSTRLEN];
@@ -151,11 +161,10 @@ struct tls_child {
 
 int tlsscan_delete (void *st);
 void tlsscan_start (struct tls_state *pqry);
-bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr);
+static void event_cb(struct bufferevent *bev, short events, void *ptr);
 static void write_cb(struct bufferevent *bev, void *ptr);
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr);
 static void timeout_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h);
-static bool tls_child_start (struct tls_child *qry, const char * cipher_list);
 
 static struct tls_base *tls_base = NULL;
 static char line[(DEFAULT_LINE_LENGTH+1)];
@@ -194,8 +203,8 @@ static void free_pqry_inst_cb (int unused  UNUSED_PARAM, const short event UNUSE
 static void free_child_cb(int unused  UNUSED_PARAM, const short event UNUSED_PARAM, void *h)
 {
 
-	struct tls_child *qry = h;
-	/* only free ephemeral data for the child/grand child qury */
+	struct tls_qry *qry = h;
+	/* only free ephemeral data of the child query */
 	if(qry->err.size)
 	{
 		buf_cleanup(&qry->err);
@@ -214,7 +223,119 @@ static void free_child_cb(int unused  UNUSED_PARAM, const short event UNUSED_PAR
 	}
 }
 
-static void ssl_gc_init(struct tls_child *qry)
+/* Initialize a struct timeval by converting milliseconds */
+static void msecstotv(time_t msecs, struct timeval *tv)
+{
+	tv->tv_sec  = msecs / 1000;
+	tv->tv_usec = msecs % 1000 * 1000;
+}
+
+static bool tls_inst_start (struct tls_qry *qry, const char *cipher_q)
+{
+	/* OpenSSL is initialized, SSL_library_init() should be called already */
+
+	/* 
+	 ssl_ctx are not shared between quries. It could but not sure how to 
+	 set structures with specific versions and algorithms. Instead using
+	 one ctx per query.
+	 */
+
+	switch(qry->sslv)
+	{
+		case SSL3_VERSION:
+			qry->ssl_ctx = SSL_CTX_new(SSLv3_client_method());
+			qry->sslv_str = SSL_TXT_SSLV3;
+			break;
+		case TLS1_VERSION:
+			qry->ssl_ctx = SSL_CTX_new(TLSv1_client_method());
+			qry->sslv_str = SSL_TXT_TLSV1;
+			break;
+		case TLS1_1_VERSION:
+			qry->ssl_ctx = SSL_CTX_new(TLSv1_1_client_method());
+			qry->sslv_str = SSL_TXT_TLSV1_1;
+			break;
+		case TLS1_2_VERSION:
+			qry->ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
+			qry->sslv_str = SSL_TXT_TLSV1_2;
+			break;
+		default:
+			qry->ssl_ctx = SSL_CTX_new(SSLv23_client_method());
+			qry->sslv_str = "TLSv1/SSL2/SSL3";
+			break;
+
+	}
+
+	qry->cipher_q =  cipher_q;
+
+	/* Do we want to do any sort of vericiation the probe? */
+	/* if we don't we might be hitting a proxy server in the way */
+	// verify_ssl_cert(qry);
+
+
+	/* this cipher per context . we are setting per connection */
+	// SSL_CTX_set_cipher_list(qry->ssl_ctx, "ALL:COMPLEMENTOFALL");
+	// SSL_CTX_set_cipher_list(qry->ssl_ctx, "HIGH");
+
+	if (!qry->ssl_ctx) {
+		crondlog_aa(LVL9, "SSL_CTX_new %s", __func__);
+		return TRUE;
+	}
+
+	qry->ssl = SSL_new(qry->ssl_ctx);
+	if (qry->ssl == NULL) {
+		crondlog_aa(LVL9, "SSL_new() %s", __func__);
+		return TRUE;
+	}
+	SSL_set_cipher_list(qry->ssl, cipher_q);
+
+	/* Set hostname for SNI extension */
+	SSL_set_tlsext_host_name(qry->ssl, qry->ui->host);
+
+	msecstotv(DEFAULT_NOREPLY_TIMEOUT, &qry->ui->timeout_tv);
+	evtimer_add(&qry->timeout_ev, &qry->ui->timeout_tv);
+
+	qry->bev = bufferevent_openssl_socket_new(EventBase, -1, qry->ssl,
+			BUFFEREVENT_SSL_CONNECTING,
+			BEV_OPT_CLOSE_ON_FREE);
+
+	//bufferevent_openssl_set_allow_dirty_shutdown(qry->bev, 1);
+	bufferevent_setcb(qry->bev, http_read_cb, write_cb, event_cb, qry);
+
+	{
+		void *ptr = NULL;
+		if (qry->addr_curr->ai_family == AF_INET) {
+			ptr = &((struct sockaddr_in *) qry->addr_curr->ai_addr)->sin_addr;
+		}
+		else if (qry->addr_curr->ai_family == AF_INET6) {
+			ptr = &((struct sockaddr_in6 *)
+					qry->addr_curr->ai_addr)->sin6_addr;
+		}
+		inet_ntop (qry->addr_curr->ai_family, ptr, qry->addrstr, INET6_ADDRSTRLEN);
+		crondlog_aa(LVL7, "connect to %s %s active = %d %s %s",
+				qry->addrstr, qry->ui->host, qry->ui->active, qry->sslv_str, qry->cipher_q);
+	}
+
+	if (bufferevent_socket_connect(qry->bev,
+				qry->addr_curr->ai_addr,
+				qry->addr_curr->ai_addrlen)) {
+		crondlog_aa(LVL8, "ERROR bufferevent_socket_connect to %s \"%s\""
+				"ctive = %d %s %s - %s", qry->addrstr, qry->ui->host, 
+				qry->ui->active, qry->sslv_str, qry->cipher_q,
+				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR())
+				);
+
+		// warnx("could not connect to %s : %s", qry->ui->host, evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
+		bufferevent_free(qry->bev);
+		qry->bev = NULL;
+		return TRUE;
+	}
+	else{
+		gettimeofday(&qry->start_time, NULL);
+		return FALSE;
+	}
+	return FALSE;
+}
+static void ssl_c_init(struct tls_qry *qry)
 {
 	int i;
 	const char *p;
@@ -225,39 +346,45 @@ static void ssl_gc_init(struct tls_child *qry)
 
 	for (i=0; ; i++)
 	{
-		struct tls_child *gcqry = NULL; /* next query grand child */
+		struct tls_qry *cqry = NULL; /* next child query */
 
 		p = SSL_get_cipher_list(ssl,i);
 		if (p == NULL) {
-			printf ("%d got null" , i);
+			crondlog_aa(LVL7, "%s dst %s active = %d" " active_c = %d %s %s %s created %d children",  __func__,
+				qry->addrstr, qry->ui->active, qry->active_c, qry->sslv_str, p, qry->ui->host, i);
 			break;
 		}
 		/* skip the one that server picked. We know that is supported */
-		if (strlen(p) && strncmp(p, qry->cipher_list, strlen(p)) == 0)
+		if (strlen(p) && strncmp(p, qry->cipher_r, strlen(p)) == 0)
 			continue;
 
-		qry->p->active++;
-		gcqry = xzalloc(sizeof(struct tls_child));
+		qry->ui->active++;
+		cqry = xzalloc(sizeof(struct tls_qry));
 
-		if (gcqry == NULL)
+		if (cqry == NULL)
 			break;
 
-		gcqry->next = qry->p->c;
-		qry->p->c = gcqry;
 		qry->tls_incomplete = TRUE;
-		gcqry->p = qry->p;
-		qry->p->q_serial++;
-		gcqry->serial =  qry->p->q_serial;
+		cqry->ui = qry->ui;
+		qry->ui->q_serial++;
+		qry->active_c++;
+		cqry->serial =  qry->ui->q_serial;
 
-		gcqry->addr_curr = qry->addr_curr;
-		gcqry->result = qry->result;
-		evtimer_assign(&gcqry->timeout_ev, EventBase, timeout_cb, gcqry);
-		evtimer_assign(&gcqry->free_child_ev, EventBase, free_child_cb, gcqry);
-		gcqry->sslv  = qry->sslv;
-		crondlog_aa(LVL7, "grand child %s %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, p);
-		tls_child_start(gcqry, p);
-		gcqry->is_gc = TRUE;
+		cqry->addr_curr = qry->addr_curr;
+		cqry->result = qry->result;
+		evtimer_assign(&cqry->timeout_ev, EventBase, timeout_cb, cqry);
+		evtimer_assign(&cqry->free_child_ev, EventBase, free_child_cb, cqry);
+		cqry->sslv  = qry->sslv;
+		crondlog_aa(LVL7, "%s dst %s active = %d" " active_c = %d %s %s %s",  __func__,
+				qry->addrstr, qry->ui->active, qry->active_c, qry->sslv_str, p, qry->ui->host);
+		cqry->is_c = TRUE;
+		cqry->p = qry;
+		cqry->cc = qry->cc;
+		cqry->certs = qry->certs;
+		cqry->cfps = qry->cfps;
+		cqry->ciphers_s_buf = qry->ciphers_s_buf;
+		cqry->cipher_q = p;
+		tls_inst_start(cqry, p);
 	}
 	SSL_free(ssl);
 }
@@ -281,63 +408,112 @@ static void atlas_cert_char_encode (struct buf *lbuf, BUF_MEM *bptr)
 	AS("\"");
 }
 
-static void add_certs_to_array (struct tls_child *qry)
+static char * add_cert_and_fp(unsigned char *md, X509* cert, struct tls_qry *qry, int *id) {
+	unsigned int n;
+	struct cert_fp *cfp = qry->cfps;
+	const EVP_MD *fdig = EVP_sha1();
+	int i = 0; 
+
+
+	if (X509_digest(cert,fdig,md,&n) == 0) 
+	{
+		return "error in X509_digest";
+	}
+
+	*id = -1;
+	while ( cfp != NULL) {
+		if (memcmp(md, cfp->fp, EVP_MAX_MD_SIZE) == 0) 
+		{
+			*id = i;
+			break;
+		}
+		i++;
+		cfp = cfp->next;
+	} 
+
+	/* this is a new certificate add to chain */ 
+
+	if (*id == -1) {
+		struct buf *lbuf = qry->cc;
+		BIO *b64 = BIO_new (BIO_s_mem());
+		BUF_MEM *bptr;
+		int k;
+		char c3[4];
+
+		cfp = xzalloc(sizeof(struct cert_fp));
+		cfp->next = qry->cfps;
+		qry->cfps = cfp;
+		memcpy(cfp->fp, md, EVP_MAX_MD_SIZE);
+
+		*id = i;
+		PEM_write_bio_X509(b64, cert);
+		BIO_get_mem_ptr(b64, &bptr);
+
+		if (lbuf->size == 0) {
+			if (i == 0) {
+				AS(", \"cert_chain\" : [");
+			}
+		}
+		if ( i > 0 )
+			AS(", ");
+		AS("{");
+		JD(id , i);
+		atlas_cert_char_encode(lbuf, bptr);
+		BIO_free(b64);
+
+		AS(", \"fp\":\"");
+		for (k=0; k<(int)n; k++)
+		{
+			snprintf(c3, sizeof(c3),"%02X%c",md[k],
+					(k+1 == (int)n) ?'"':':');
+			AS(c3);
+
+		}
+		AS("}");
+	}
+	return NULL;
+}
+
+static void add_cert_chain( STACK_OF(X509) *sk, struct tls_qry *qry) {
+	int i;
+	int cert_id = -1;
+
+	for (i=0; i<sk_X509_num(sk); i++) {
+		X509* cert =  sk_X509_value(sk,i);
+		unsigned char md[EVP_MAX_MD_SIZE];
+		char *err_s;
+
+		memset(md, '\0', EVP_MAX_MD_SIZE);
+		err_s = add_cert_and_fp(md, cert, qry, &cert_id);
+
+		if(err_s  != NULL) {
+			struct buf *lbuf = &qry->err;
+			if(lbuf->size > 0) 
+				AS (",");
+			JS_NC(X509cert, err_s);
+		}
+	}
+}
+
+static void get_cert_chain(struct tls_qry *qry)
 {
 	int i;
-	struct buf *lbuf = &qry->p->ccbuf; /* careful with lbuf it is used by JSON Macros */
+	struct buf *lbuf = qry->cc; /* careful with lbuf it is used by JSON Macros */
 	STACK_OF(X509) *sk = NULL;
-	X509 *peer = NULL;
-	char buf[(DEFAULT_LINE_LENGTH * 8)];  /* for subject, issuer */
+	// X509 *peer = NULL;
 
-	if(qry->p->opt_out_format & OUTPUT_FMT_NO_CERTS)
+	if(qry->ui->opt_out_format & OUTPUT_FMT_NO_CERTS)
 		return;
 
 	sk = SSL_get_peer_cert_chain(qry->ssl);
-	if(sk != NULL) {
-		for (i=0; i<sk_X509_num(sk); i++) {
-			X509* cert =  sk_X509_value(sk,i);
-			BUF_MEM *bptr;
-			BIO *b64 = BIO_new (BIO_s_mem());
+	if(sk == NULL) {
+		lbuf = &qry->err;
+		if(lbuf->size > 0) 
+			AS (",");
+		JS_NC(X509cert_chain, "no cert chain found after handshake");
 
-			PEM_write_bio_X509(b64, cert);
-			BIO_get_mem_ptr(b64, &bptr);
-
-			if (lbuf->size == 0) {
-				if (i == 0) {
-					AS(", \"cert_chain\" : [");
-				}
-			}
-			if ( i > 0 )
-				AS(", ");
-			AS("{");
-			JD(id , i);
-			atlas_cert_char_encode(lbuf, bptr);
-			BIO_free(b64);
-			unsigned char md[EVP_MAX_MD_SIZE];
-			const EVP_MD *fdig = EVP_sha1();
-			unsigned int n;
-			if (X509_digest(cert,fdig,md,&n))
-			{
-				AS(", \"fp\" : ");
-				int k;
-				char c3[4];
-				for (k=0; k<(int)n; k++)
-				{
-					snprintf(c3, sizeof(c3),"%02X%c",md[k],
-							(k+1 == (int)n) ? '"' : ':');
-					AS(c3);
-
-				}
-				AS(",");
-			}
-			X509_NAME_oneline(X509_get_subject_name(cert),
-					buf,sizeof(buf));
-			JS(subject, buf);
-			X509_NAME_oneline(X509_get_issuer_name(cert),
-					buf,sizeof (buf));
-			JS(issuer, buf);
-			AS("}");
-		}
+	} else {
+		add_cert_chain(sk, qry);
 	}
 
 	/*
@@ -347,14 +523,15 @@ static void add_certs_to_array (struct tls_child *qry)
 	}
 	*/
 }
-static void add_certs_to_result (struct tls_child *qry)
+
+static void add_certs_to_result (struct tls_qry *qry)
 {
 	int i;
 	STACK_OF(X509) *sk;
 
 	struct buf *lbuf = qry->result;
 
-	if(!(qry->p->opt_out_format & OUTPUT_FMT_NO_CERTS))
+	if(!(qry->ui->opt_out_format & OUTPUT_FMT_NO_CERTS))
 		return;
 
 	if((sk = SSL_get_peer_cert_chain(qry->ssl)) == NULL)
@@ -383,7 +560,7 @@ static void add_certs_to_result (struct tls_child *qry)
 	}
 }
 
-static void fmt_ssl_time(struct tls_child *qry)
+static void fmt_ssl_time(struct tls_qry *qry)
 {
 	int lts =  -1 ; /*  get_timesync(); */ /* AA_FIXME */
 	struct buf *lbuf = qry->result;
@@ -393,14 +570,14 @@ static void fmt_ssl_time(struct tls_child *qry)
 
 }
 
-static void fmt_ssl_host(struct tls_child *qry, bool is_err)
+static void fmt_ssl_host(struct tls_qry *qry, bool is_err)
 {
 	char addrstr[INET6_ADDRSTRLEN];
 	struct buf *lbuf = qry->result;
 
 	if ((qry->addr_curr != NULL) && (qry->addrstr[0] !=  '\0')) {
-		if(strcmp(qry->addrstr, qry->p->host)) {
-			JS(dst_name, qry->p->host);
+		if(strcmp(qry->addrstr, qry->ui->host)) {
+			JS(dst_name, qry->ui->host);
 		}
 		JS(dst_addr , qry->addrstr);
 
@@ -413,79 +590,86 @@ static void fmt_ssl_host(struct tls_child *qry, bool is_err)
 		}
 		JD_NC(af, qry->addr_curr->ai_family == PF_INET6 ? 6 : 4);
 	}
-	else if (qry->p->host) {
-		JS_NC(dst_name, qry->p->host);
+	else if (qry->ui->host) {
+		JS_NC(dst_name, qry->ui->host);
 	}
 }
 
-static void fmt_ssl_p_result(struct tls_child *qry)
+static void fmt_ssl_ui_result(struct tls_qry *qry)
 {
 	int lts =  -1 ; /*  get_timesync(); */ /* AA_FIXME */
 	int fw = get_atlas_fw_version();
-	struct buf *lbuf = qry->result;
+	struct buf *lbuf = &qry->ui->result;
 
 	AS("RESULT { ");
-	if(qry->p->str_Atlas != NULL)
+	if(qry->ui->str_Atlas != NULL)
 	{
-		JS(id, qry->p->str_Atlas);
+		JS(id, qry->ui->str_Atlas);
 	}
 	JD(fw, fw);
-	JD(dnscount, qry->p->dns_count);
-	JS1(time, %ld, qry->p->start_time.tv_sec);
+	JD(dnscount, qry->ui->dns_count);
+	JS1(time, %ld, qry->ui->start_time.tv_sec);
 	JD(lts,lts); // fix me take lts when I create start time.
-	AS("\"resultset\" : [ {");
-
+	if (qry->addr_curr == NULL) {
+			JS_NC(dst_name, qry->ui->host);
+	} else {
+		AS("\"resultset\" : [");
+	}
 }
 
-static void fmt_ssl_summary(struct tls_child *qry, bool is_err)
+static void fmt_ssl_summary(struct tls_qry *qry, bool is_err)
 {
 	int size = qry->result->size ;
 	struct buf *lbuf = qry->result;
+
+	if (qry->addr_curr == NULL)
+		return; 
 
 	if (size == 0){
 		AS ("{");
 		fmt_ssl_time(qry);
 		fmt_ssl_host(qry, is_err);
 
-
 		if(qry->retry) {
 			JD(retry, qry->retry);
 		}
 		if (qry->sslv_str != NULL) {
 			AS (", ");
-			JS(version, qry->sslv_str);
+			JS_NC(version, qry->sslv_str);
 		}
 
 	}
 	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
 			(!qry->tls_incomplete)) {
-		qry->p->q_success++;
-		if (size == 0) {
-			AS (", \"ciphers\" : [");
+		qry->ui->q_success++;
+		lbuf = qry->ciphers_s_buf; /* note lbuf changed */
+		if (qry->ciphers_s_buf->size == 0) {
+			AS (", \"ciphers\": [");
 		} else {
 			AS(" ,");
 		}
 
 		AS ("\"");
-		AS (SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
-		AS ("\"");
+		qry->cipher_r = SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl));
+		AS (qry->cipher_r);
+		AS("\"");
+		get_cert_chain(qry);
 
-		if ((qry->is_gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
+		if ((qry->is_c == FALSE) && (qry->ui->opt_all_tests == TRUE))  {
 			/* this is a successful child. 
-			 * create grand children with algorithm varients 
+			 * create children with cipher algorithm varients 
 			 */
-			ssl_gc_init(qry);
+			ssl_c_init(qry);
 		}
-		add_certs_to_array(qry);
 	}
 }
 
-static void fmt_ssl_cert_full_resp(struct tls_child *qry, bool is_err)
+static void fmt_ssl_cert_full_resp(struct tls_qry *qry, bool is_err)
 {
 
 	struct buf *lbuf = qry->result;
 	/* if it is a failed grand child qury nothing to print */
-	if (qry->is_gc && qry->tls_incomplete ){
+	if (qry->is_c && qry->tls_incomplete ){
 		if(qry->err.size)
 		{
 			buf_cleanup(&qry->err);
@@ -494,7 +678,7 @@ static void fmt_ssl_cert_full_resp(struct tls_child *qry, bool is_err)
 	}
 
 	if (qry->result->size == 0){ /* initialze the first parts RESULT */
-		fmt_ssl_p_result(qry);
+		fmt_ssl_ui_result(qry);
 	}
 	else {
 		AS (",{");
@@ -507,9 +691,9 @@ static void fmt_ssl_cert_full_resp(struct tls_child *qry, bool is_err)
 	fmt_ssl_time(qry);
 	fmt_ssl_host(qry, is_err);
 
-	if (qry->cipher_list != NULL) {
+	if (qry->cipher_r != NULL) {
 		AS (", ");
-		JS_NC(ciphers, qry->cipher_list);
+		JS_NC(ciphers, qry->cipher_r);
 	}
 
 	if (qry->sslv_str != NULL) {
@@ -520,28 +704,28 @@ static void fmt_ssl_cert_full_resp(struct tls_child *qry, bool is_err)
 	if ( !is_err && (qry->ssl_ctx != NULL) && (qry->ssl != NULL) &&
 			(qry->tls_incomplete == FALSE)) {
 		int i;
-		qry->p->q_success++;
+		qry->ui->q_success++;
 		AS(",");
 		JS_NC(cipher, SSL_CIPHER_get_name(SSL_get_current_cipher(qry->ssl)));
 
 	 	add_certs_to_result(qry);
 
-		if ((qry->is_gc == FALSE) && (qry->p->opt_all_tests == TRUE))  {
+		if ((qry->is_c == FALSE) && (qry->ui->opt_all_tests == TRUE))  {
 			/* this is a successful child. 
-			 * create grand children with algorithm varients 
+			 * create children with cipher algorithm varients 
 			 */
-			ssl_gc_init(qry);
+			ssl_c_init(qry);
 		}
 	}
 
-	if ((qry->err.size > 0) || (qry->p->err.size > 0))
+	if ((qry->err.size > 0) || (qry->ui->err.size > 0))
 	{
 		AS(", \"error\" : {");
 		if (qry->err.size > 0) {
 			buf_add(qry->result, qry->err.buf, qry->err.size);
 		}
-		if (qry->p->err.size > 0) {
-			buf_add(qry->result, qry->p->err.buf, qry->p->err.size);
+		if (qry->ui->err.size > 0) {
+			buf_add(qry->result, qry->ui->err.buf, qry->ui->err.size);
 		}
 		AS("}");
 	}
@@ -549,23 +733,25 @@ static void fmt_ssl_cert_full_resp(struct tls_child *qry, bool is_err)
 }
 
 
-static void write_results(struct tls_child *qry)
+static void write_results(struct tls_qry *qry)
 {
 	FILE *fh;
-	struct buf *lbuf = qry->result;
+	struct buf *lbuf = &qry->ui->result;
 	/* end of result only JSON closing brackets from here on */
-	AS("]");  /* resultset : [{}..] */
+	if (qry->addr_curr != NULL) {
+		AS("]");  /* resultset : [{}..] */
+	}
 
-	AS (" ,");
-	JD(queries, qry->p->q_serial);
-	JD_NC(success, qry->p->q_success);
+	AS (", ");
+	JD(queries, qry->ui->q_serial);
+	JD_NC(success, qry->ui->q_success);
 
-	if (qry->p->out_filename)
+	if (qry->ui->out_filename)
 	{
-		fh= fopen(qry->p->out_filename, "a");
+		fh= fopen(qry->ui->out_filename, "a");
 		if (!fh) {
 			crondlog(LVL8 "unable to append to '%s'",
-					qry->p->out_filename);
+					qry->ui->out_filename);
 		}
 	}
 	else
@@ -573,51 +759,94 @@ static void write_results(struct tls_child *qry)
 
 	if (fh) {
 		char *closing = " }\n"; /* RESULT { } . end of RESULT line */
-		fwrite(qry->result->buf, qry->result->size, 1 , fh);
+		fwrite(qry->ui->result.buf, qry->ui->result.size, 1 , fh);
 		/* adds the certs directly fh, not to results to save doubling string memory */
-		if (qry->p->ccbuf.size > 0) {
-			fwrite(qry->p->ccbuf.buf, qry->p->ccbuf.size, 1 , fh);
-		}
 		fwrite(closing, strlen(closing), 1 , fh);
 
 	}
 	buf_cleanup(qry->result);
 
-	if (qry->p->out_filename)
+	if (qry->ui->out_filename)
 		fclose(fh);
 
-	qry->p->state = STATUS_FREE;
+	qry->ui->state = STATUS_FREE;
 	qry->retry = 0;
 }
 
-static void print_tls_resp(struct tls_child *qry, bool is_err) {
+static void print_tls_resp(struct tls_qry *qry, bool is_err) {
 
 	struct timeval asap = { 0, 1 };
-	struct tls_state *pqry = qry->p;
+	struct tls_state *pqry = qry->ui;
+	int active_c = 0;
 
-	if (qry->p->active > 0)
-		qry->p->active--;
+	if (qry->ui->active > 0)
+		qry->ui->active--;
 
-	qry->p->q_done++;
+	if ((qry->p != NULL ) && (qry->p->active_c > 0)) {
+		qry->p->active_c--; 
+		active_c = qry->p->active_c;
+	}
 
-	if (qry->p->opt_out_format & OUTPUT_FMT_CERTS_FULL) {
+	if (qry->ui->opt_out_format & OUTPUT_FMT_CERTS_FULL) {
 		fmt_ssl_cert_full_resp(qry, is_err);
 	} else {
 		fmt_ssl_summary(qry, is_err);
 	}
 
-	evtimer_add(&qry->free_child_ev, &asap);
+	if (((qry->p == NULL ) && (qry->active_c == 0)) ||
+			((qry->p != NULL ) && (qry->p->active_c == 0)))
+	{
+		struct buf *lbuf = &qry->ui->result;
+		evtimer_add(&qry->free_child_ev, &asap);
+		if (qry->ui->result.size == 0) { /* initialze the first parts RESULT */
+			fmt_ssl_ui_result(qry);
+		} else {
+			buf_add(&qry->ui->result, ", ", 1);
+		}
 
-	if (qry->p->active < 1) {
+		if(qry->addr_curr != NULL) {
+			buf_add(&qry->ui->result, qry->result->buf, qry->result->size);
+			buf_cleanup(qry->result);
+			if (qry->err.size > 0) {
+				AS(", \"error\" : {");
+				buf_add(&qry->ui->result, qry->err.buf, qry->err.size);
+				AS("}");
+				buf_cleanup(&qry->err);
+			}
+			
+			if (qry->cc->size > 0) {
+				buf_add(&qry->ui->result, qry->cc->buf, qry->cc->size);
+				buf_cleanup(qry->cc);
+			} 
+
+			if (qry->ciphers_s_buf->size > 0) {
+				buf_add(qry->ciphers_s_buf, "]", 1);
+				buf_add(&qry->ui->result, qry->ciphers_s_buf->buf, qry->ciphers_s_buf->size);
+				buf_cleanup(qry->ciphers_s_buf);
+			}
+
+			AS("}");
+		}
+		if (qry->ui->err.size > 0) {
+			AS(", \"error\" : {");
+			buf_add(&qry->ui->result, qry->ui->err.buf, qry->ui->err.size);
+			AS("}");
+			buf_cleanup(&qry->ui->err);
+		}
+
+	}
+
+	if (qry->ui->active < 1) {
 		write_results(qry);
 		evtimer_add(&pqry->free_inst_ev, &asap);
 
-		if (qry->p->done) /* call the done function */
-			evtimer_add(&qry->p->done_ev, &asap);
+		if (qry->ui->done) /* call the done function */
+			evtimer_add(&qry->ui->done_ev, &asap);
 	}
 	else {
-		crondlog_aa(LVL7, "%s no output yet. %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
+		crondlog_aa(LVL7, "%s no output yet, dst %s active = %d"
+				" active_c = %d %s %s %s",  __func__,
+				qry->addrstr, qry->ui->active, active_c, qry->sslv_str, qry->cipher_q, qry->ui->host);
 	}
 }
 
@@ -662,13 +891,18 @@ int tlsscan_delete (void *st)
 static void timeout_cb(int unused  UNUSED_PARAM, const short event
 		UNUSED_PARAM, void *h)
 {
-	struct tls_child *qry = (struct tls_child *)h;
+	struct tls_qry *qry = (struct tls_qry *)h;
 
 	if(qry->addr_curr == NULL) {
-		crondlog_aa(LVL7, "%s %s",  __func__, qry->p->host);
+		crondlog_aa(LVL7, "%s %s",  __func__, qry->ui->host);
 	} else {
-		crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
+		int active_c = 0;
+		if (qry->p != NULL) 
+			active_c = qry->active_c;
+
+		crondlog_aa(LVL7, "%s no output yet, dst %s active = %d"
+				" active_c = %d %s %s %s",  __func__,
+				qry->addrstr, qry->ui->active, active_c, qry->sslv_str, qry->cipher_q, qry->ui->host);
 
 		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"timeout\" : %d", qry->err.size ? ", " : "", DEFAULT_NOREPLY_TIMEOUT);
 		buf_add(&qry->err, line, strlen(line));
@@ -676,12 +910,7 @@ static void timeout_cb(int unused  UNUSED_PARAM, const short event
 	print_tls_resp(qry, TRUE);
 }
 
-/* Initialize a struct timeval by converting milliseconds */
-static void msecstotv(time_t msecs, struct timeval *tv)
-{
-	tv->tv_sec  = msecs / 1000;
-	tv->tv_usec = msecs % 1000 * 1000;
-}
+
 
 /* See http://archives.seul.org/libevent/users/Jan-2013/msg00039.html */
 static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
@@ -754,7 +983,7 @@ static int cert_verify_callback(X509_STORE_CTX *x509_ctx, void *arg)
 	}
 }
 
-static bool verify_ssl_cert (struct tls_child *qry) {
+static bool verify_ssl_cert (struct tls_qry *qry) {
 
 	/* Attempt to use the system's trusted root certificates.
 	 * (This path is only valid for Debian-based systems.) */
@@ -785,124 +1014,20 @@ static bool verify_ssl_cert (struct tls_child *qry) {
 	 * we hadn't set the callback.  Therefore, we're just
 	 * "wrapping" OpenSSL's routine, not replacing it. */
 
-	SSL_CTX_set_cert_verify_callback (qry->ssl_ctx, cert_verify_callback, (void *) qry->p->host);
+	SSL_CTX_set_cert_verify_callback (qry->ssl_ctx, cert_verify_callback, (void *) qry->ui->host);
 }
 
 
-static bool tls_child_start (struct tls_child *qry, const char * cipher_list)
+
+static void event_cb(struct bufferevent *bev, short events, void *ptr)
 {
-	/* OpenSSL is initialized, SSL_library_init() should be called already */
-
-	/* 
-	 ssl_ctx are not shared between quries. It could but not sure how to 
-	 set structures with specific versions and algorithms. Instead using
-	 one ctx per query.
-	 */
-
-	switch(qry->sslv)
-	{
-		case SSL3_VERSION:
-			qry->ssl_ctx = SSL_CTX_new(SSLv3_client_method());
-			qry->sslv_str = SSL_TXT_SSLV3;
-			break;
-		case TLS1_VERSION:
-			qry->ssl_ctx = SSL_CTX_new(TLSv1_client_method());
-			qry->sslv_str = SSL_TXT_TLSV1;
-			break;
-		case TLS1_1_VERSION:
-			qry->ssl_ctx = SSL_CTX_new(TLSv1_1_client_method());
-			qry->sslv_str = SSL_TXT_TLSV1_1;
-			break;
-		case TLS1_2_VERSION:
-			qry->ssl_ctx = SSL_CTX_new(TLSv1_2_client_method());
-			qry->sslv_str = SSL_TXT_TLSV1_2;
-			break;
-		default:
-			qry->ssl_ctx = SSL_CTX_new(SSLv23_client_method());
-			qry->sslv_str = "TLSv1/SSL2/SSL3";
-			break;
-
-	}
-
-	qry->cipher_list =  cipher_list;
-
-	/* Do we want to do any sort of vericiation the probe? */
-	/* if we don't we might be hitting a proxy server in the way */
-	// verify_ssl_cert(qry);
-
-
-	/* this cipher per context . we are setting per connection */
-	// SSL_CTX_set_cipher_list(qry->ssl_ctx, "ALL:COMPLEMENTOFALL");
-	// SSL_CTX_set_cipher_list(qry->ssl_ctx, "HIGH");
-
-	if (!qry->ssl_ctx) {
-		crondlog_aa(LVL9, "SSL_CTX_new %s", __func__);
-		return TRUE;
-	}
-
-	qry->ssl = SSL_new(qry->ssl_ctx);
-	if (qry->ssl == NULL) {
-		crondlog_aa(LVL9, "SSL_new() %s", __func__);
-		return TRUE;
-	}
-	SSL_set_cipher_list(qry->ssl, cipher_list);
-
-	/* Set hostname for SNI extension */
-	SSL_set_tlsext_host_name(qry->ssl, qry->p->host);
-
-	msecstotv(DEFAULT_NOREPLY_TIMEOUT, &qry->p->timeout_tv);
-	evtimer_add(&qry->timeout_ev, &qry->p->timeout_tv);
-
-	qry->bev = bufferevent_openssl_socket_new(EventBase, -1, qry->ssl,
-			BUFFEREVENT_SSL_CONNECTING,
-			BEV_OPT_CLOSE_ON_FREE);
-
-	//bufferevent_openssl_set_allow_dirty_shutdown(qry->bev, 1);
-	bufferevent_setcb(qry->bev, http_read_cb, write_cb, event_cb, qry);
-
-	{
-		void *ptr = NULL;
-		if (qry->addr_curr->ai_family == AF_INET) {
-			ptr = &((struct sockaddr_in *) qry->addr_curr->ai_addr)->sin_addr;
-		}
-		else if (qry->addr_curr->ai_family == AF_INET6) {
-			ptr = &((struct sockaddr_in6 *)
-					qry->addr_curr->ai_addr)->sin6_addr;
-		}
-		inet_ntop (qry->addr_curr->ai_family, ptr, qry->addrstr, INET6_ADDRSTRLEN);
-		crondlog_aa(LVL7, "connect to %s %s active = %d %s %s",
-				qry->addrstr, qry->p->host, qry->p->active, qry->sslv_str, qry->cipher_list);
-	}
-
-	if (bufferevent_socket_connect(qry->bev,
-				qry->addr_curr->ai_addr,
-				qry->addr_curr->ai_addrlen)) {
-		crondlog_aa(LVL8, "ERROR bufferevent_socket_connect to %s \"%s\""
-				"ctive = %d %s %s - %s", qry->addrstr, qry->p->host, 
-				qry->p->active, qry->sslv_str, qry->cipher_list,
-				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR())
-				);
-
-		// warnx("could not connect to %s : %s", qry->p->host, evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
-		bufferevent_free(qry->bev);
-		qry->bev = NULL;
-		return TRUE;
-	}
-	else{
-		gettimeofday(&qry->start_time, NULL);
-		return FALSE;
-	}
-	return FALSE;
-}
-
-bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
-{
-	struct tls_child *qry = ptr;
+	struct tls_qry *qry = ptr;
 	struct timeval rectime ;
 	if (events & BEV_EVENT_ERROR)
 	{
-		crondlog_aa(LVL7, "ERROR %s %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
+		crondlog_aa(LVL7, "BEV_EVENT_ERROR %s %s %s active = %d %s %s | %s",  __func__,
+				qry->ui->host, qry->addrstr, qry->ui->active, qry->sslv_str, qry->cipher_q,
+				evutil_socket_error_to_string(EVUTIL_SOCKET_ERROR()));
 
 		evtimer_del(&qry->timeout_ev);
 		snprintf(line, DEFAULT_LINE_LENGTH, "%s \"connect\" : \"%s\"",
@@ -916,6 +1041,7 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 
 	if (events & BEV_EVENT_CONNECTED)
 	{
+		int active_c = 0;
 		if (qry->loc_socklen == 0) {
 			qry->loc_socklen= sizeof(qry->loc_sin6);
 			getsockname(bufferevent_getfd(bev), &qry->loc_sin6, &qry->loc_socklen);
@@ -926,8 +1052,12 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 		qry->triptime = (rectime.tv_sec - qry->start_time.tv_sec)*1000 +
 			(rectime.tv_usec - qry->start_time.tv_usec)/1e3;
 
-		crondlog_aa(LVL7, "BEV_EVENT_CONNECTED %s %s %s active = %d %s %s",  __func__,
-				qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
+		if (qry->p != NULL) {
+			active_c = qry->p->active_c;
+		}
+
+		crondlog_aa(LVL7, "%s BEV_EVENT_CONNECTED active = %d active_c = %d %s %s %s %s",  __func__,
+				qry->ui->active, active_c, qry->sslv_str, qry->cipher_q,  qry->addrstr, qry->ui->host);
 		write_cb(qry->bev, qry);
 		return;
 	}
@@ -938,10 +1068,14 @@ bufferevent_data_cb event_cb(struct bufferevent *bev, short events, void *ptr)
 
 static void http_read_cb(struct bufferevent *bev UNUSED_PARAM, void *ptr)
 {
-	struct tls_child  *qry = ptr;
+	struct tls_qry  *qry = ptr;
+	int active_c = 0;
 
-	crondlog_aa(LVL7, "%s %s %s active = %d %s %s",  __func__,
-			qry->p->host, qry->addrstr, qry->p->active, qry->sslv_str, qry->cipher_list);
+	if (qry->p != NULL) 
+		active_c = qry->p->active_c;
+
+	crondlog_aa(LVL7, "%s BEV_EVENT_CONNECTED active = %d active_c = %d %s %s %s %s",  __func__,
+				qry->ui->active, active_c, qry->sslv_str, qry->cipher_q,  qry->addrstr, qry->ui->host);
 	evtimer_del(&qry->timeout_ev);
 	qry->tls_incomplete = FALSE;
 	print_tls_resp(qry, FALSE);
@@ -952,7 +1086,7 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 {
 	struct evbuffer *output;
 	struct timeval endtime;
-	struct tls_child *qry = ptr;
+	struct tls_qry *qry = ptr;
 
 	// printf("%s: start:\n", __func__);
 
@@ -970,14 +1104,14 @@ static void write_cb(struct bufferevent *bev, void *ptr)
 		case WRITE_HEADER:
 			output= bufferevent_get_output(bev); 
 			evbuffer_add_printf(output, "%s %s HTTP/1.%c\r\n",
-				qry->p->do_get ? "GET" :
-				qry->p->do_head ? "HEAD" : "POST", qry->p->path,
-				qry->p->do_http10 ? '0' : '1');
+				qry->ui->do_get ? "GET" :
+				qry->ui->do_head ? "HEAD" : "POST", qry->ui->path,
+				qry->ui->do_http10 ? '0' : '1');
 			evbuffer_add_printf(output, "Host: %s\r\n",
-				qry->p->host);
+				qry->ui->host);
 			evbuffer_add_printf(output, "Connection: close\r\n");
 			evbuffer_add_printf(output, "User-Agent: %s\r\n",
-				qry->p->user_agent);
+				qry->ui->user_agent);
 			evbuffer_add_printf(output, "\r\n");
 
 			qry->writestate = WRITE_DONE;
@@ -1020,10 +1154,10 @@ static bool tls_arg_validate (int argc, char *argv[], struct tls_state *pqry )
 		pqry->host = strdup(argv[optind]);
 	}
 	if (pqry->opt_all_tests ) {
-		pqry->opt_ssl_v3 = SSL3_VERSION;
-		pqry->opt_tls_v1 =  TLS1_VERSION;
-		pqry->opt_tls_v11 = TLS1_1_VERSION;
-		pqry-> opt_tls_v12 = TLS1_2_VERSION;
+	//	pqry->opt_ssl_v3 = SSL3_VERSION;
+	//	pqry->opt_tls_v1 =  TLS1_VERSION;
+	//	pqry->opt_tls_v11 = TLS1_1_VERSION;
+		pqry->opt_tls_v12 = TLS1_2_VERSION;
 	}
 
 	if ( pqry->opt_timeout > 0)
@@ -1069,7 +1203,7 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	pqry->user_agent= "httpget for atlas.ripe.net";
 	pqry->path = "/";
 	pqry->done = done;
-	pqry->opt_all_tests = FALSE;
+	pqry->opt_all_tests = TRUE;
 	pqry->timeout_tv.tv_sec = 5;
 	pqry->opt_out_format = OUTPUT_FMT_CERTS_ARRAY;
 //	pqry->opt_out_format = OUTPUT_FMT_CERTS_FULL;
@@ -1121,18 +1255,19 @@ static struct tls_state * tlsscan_init (int argc, char *argv[], void (*done)(voi
 	return pqry;
 }
  
-static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_curr, int sslv) 
+static bool tls_inst_init(struct tls_state *pqry, struct evutil_addrinfo *addr_curr, int sslv) 
 {
-	struct  tls_child *qry = xzalloc(sizeof(struct tls_child));
+	struct  tls_qry *qry = xzalloc(sizeof(struct tls_qry));
 
-	qry->next = pqry->c;
-	pqry->c = qry;
+	qry->cc = xzalloc(sizeof(struct buf));
+	qry->certs = xzalloc(sizeof(struct buf));
+	qry->ciphers_s_buf = xzalloc(sizeof(struct buf));
+	qry->result = xzalloc(sizeof(struct buf));
 	qry->addr_curr = addr_curr;
-	qry->p = pqry;
+	qry->ui = pqry;
 
-	pqry->active++;
-	qry->p->q_serial++;
-	qry->serial =  qry->p->q_serial;
+	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
+	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 
 	if (addr_curr == NULL) { /* there was dns error */
 		struct timeval asap = { 0, 0};
@@ -1140,14 +1275,14 @@ static bool tls_child_init(struct tls_state *pqry, struct evutil_addrinfo *addr_
 		return FALSE;
 	}
 
-	qry->result = &pqry->result;
+	pqry->active++;
+	qry->ui->q_serial++;
+	qry->serial =  qry->ui->q_serial;
 
-	evtimer_assign(&qry->free_child_ev, EventBase, free_child_cb, qry);
-	evtimer_assign(&qry->timeout_ev, EventBase, timeout_cb, qry);
 	qry->sslv  = sslv;
 
 	qry->tls_incomplete = TRUE;
-	tls_child_start(qry, "ALL:COMPLEMENTOFALL");
+	tls_inst_start(qry, "ALL:COMPLEMENTOFALL");
 
 	return FALSE;
 }
@@ -1167,20 +1302,20 @@ static void dns_cb(int result, struct evutil_addrinfo *res, void *ctx)
 				evutil_gai_strerror(result));
 		buf_add(&pqry->err, line, strlen(line));
 		pqry->addr = NULL;
-		tls_child_init(pqry, cur, 0);
+		tls_inst_init(pqry, cur, 0); /* initialize qry and print error */
 		return;
 	}
 
 	for (cur = res; cur != NULL; cur = cur->ai_next) {
 		pqry->dns_count++;
 		if (pqry->opt_all_tests) {
-			// tls_child_init(pqry, cur, pqry->opt_ssl_v3);
-			// tls_child_init(pqry, cur, pqry->opt_tls_v1);
-			// tls_child_init(pqry, cur, pqry->opt_tls_v11);
-			tls_child_init(pqry, cur, pqry->opt_tls_v12);
+			// tls_inst_init(pqry, cur, pqry->opt_ssl_v3);
+			// tls_inst_init(pqry, cur, pqry->opt_tls_v1);
+			// tls_inst_init(pqry, cur, pqry->opt_tls_v11);
+			tls_inst_init(pqry, cur, pqry->opt_tls_v12);
 		}
 		else  {
-			tls_child_init(pqry, cur, 0);
+			tls_inst_init(pqry, cur, 0);
 		}
 	}
 }
@@ -1258,6 +1393,12 @@ void tlsscan_start (struct tls_state *pqry)
 	pqry->hints.ai_flags = 0;
 	pqry->hints.ai_socktype = SOCK_STREAM;
 	pqry->hints.ai_flags = 0;
+
+	pqry->q_serial = 0;
+	pqry->q_success = 0;
+	pqry->active = 0;
+	pqry->retry = 0;
+	pqry->dns_count = 0;
 
 	(void) evdns_getaddrinfo(DnsBase, pqry->host, "443", &pqry->hints,
 			dns_cb, pqry);
