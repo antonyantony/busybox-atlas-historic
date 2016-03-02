@@ -5579,6 +5579,20 @@ static char **expand_assignments(char **argv, int count)
 	return p;
 }
 
+#define DBQ(str) "\"" #str "\""
+static int builtin_rptuptime(char **argv __attribute((unused))) 
+{
+	struct sysinfo info; 
+
+	printf("RESULT { " DBQ(id) ": " DBQ(7001) ", ");
+	printf(DBQ(fw) ": %d, ", get_atlas_fw_version());
+	printf(DBQ(time) ": %ld, ", (long)time(NULL));
+	printf(DBQ(lts) ": %d, ", get_timesync());
+	sysinfo(&info);
+	printf(DBQ(uptime) ": %ld }\n", (long)info.uptime);
+
+	return 0;
+}
 
 static void switch_off_special_sigs(unsigned mask)
 {

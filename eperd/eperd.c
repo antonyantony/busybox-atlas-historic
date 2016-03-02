@@ -239,10 +239,11 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 
 	INIT_G();
 
-	opt_complementary = "S-L:L-S:"; /* -l and -d have numeric param */
-	opt = getopt32(argv, "il:L:fSc:A:DP:O:",
-			&LogLevel, &LogFile, &CDir, &atlas_id, &PidFileName
-			,&out_filename);
+	opt_complementary = "S-L:L-S:"
+			    ":i+:l+:d+"; /* -i, -l and -d have numeric param */
+	opt = getopt32(argv, "i:l:L:fc:A:DP:O:",
+			&instance_id, &LogLevel, &LogFile, &CDir, &atlas_id,
+			&PidFileName, &out_filename);
 
 	/* "-b after -f is ignored", and so on for every pair a-b */
 	/* both -d N and -l N set the same variable: LogLevel */
