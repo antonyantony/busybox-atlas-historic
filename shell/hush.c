@@ -5579,6 +5579,7 @@ static char **expand_assignments(char **argv, int count)
 	return p;
 }
 
+#if ENABLE_FEATURE_IPV6 && ENABLE_FEATURE_RPTUPTIME
 #define DBQ(str) "\"" #str "\""
 static int builtin_rptuptime(char **argv __attribute((unused))) 
 {
@@ -5593,6 +5594,7 @@ static int builtin_rptuptime(char **argv __attribute((unused)))
 
 	return 0;
 }
+#endif
 
 static void switch_off_special_sigs(unsigned mask)
 {
