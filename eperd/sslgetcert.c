@@ -74,6 +74,7 @@ struct state
 	/* Parameters */
 	char *output_file;
 	char *atlas;
+	char *bundle;
 	char *infname;
 	char *response_in;	/* Fuzzing */
 	char *response_out;
@@ -635,7 +636,7 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 	int c, i, only_v4, only_v6, major, minor;
 	size_t newsiz;
 	char *hostname, *str_port, *infname, *version_str;
-	char *output_file, *A_arg;
+	char *output_file, *A_arg, *B_arg;
 	char *response_in, *response_out;
 	struct state *state;
 	FILE *fh;
@@ -644,6 +645,7 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 	output_file= NULL;
 	version_str= NULL;
 	A_arg= NULL;
+	B_arg= NULL;
 	infname= NULL;
 	str_port= NULL;
 	response_in= NULL;
@@ -661,12 +663,15 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 
 	/* Allow us to be called directly by another program in busybox */
 	optind= 0;
-	while (c= getopt_long(argc, argv, "A:O:R:V:W:i:p:46", longopts, NULL), c != -1)
+	while (c= getopt_long(argc, argv, "A:B:O:R:V:W:i:p:46", longopts, NULL), c != -1)
 	{
 		switch(c)
 		{
 		case 'A':
 			A_arg= optarg;
+			break;
+		case 'B':
+			B_arg= optarg;
 			break;
 		case 'O':
 			output_file= optarg;
@@ -749,6 +754,14 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 			return NULL;
 		}
 	}
+	if (B_arg)
+	{
+		if (!validate_atlas_id(B_arg))
+		{
+			crondlog(LVL8 "bad bundle ID '%s'", B_arg);
+			return NULL;
+		}
+	}
 
 	if (version_str == NULL || strcasecmp(version_str, "TLS1.2") == 0)
 	{
@@ -779,6 +792,7 @@ static void *sslgetcert_init(int __attribute((unused)) argc, char *argv[],
 	state= xzalloc(sizeof(*state));
 	state->base= hg_base;
 	state->atlas= A_arg ? strdup(A_arg) : NULL;
+	state->bundle= B_arg ? strdup(B_arg) : NULL;
 	state->output_file= output_file ? strdup(output_file) : NULL;
 	state->response_in= response_in ? strdup(response_in) : NULL;
 	state->response_out= response_out ? strdup(response_out) : NULL;
@@ -849,6 +863,8 @@ static void report(struct state *state)
 			DBQ(time) ":%ld, ",
 			state->atlas, get_atlas_fw_version(), get_timesync(),
 			state->gstart);
+		if (state->bundle)
+			fprintf(fh, DBQ(bundle) ":%s, ", state->bundle);
 	}
 
 	fprintf(fh, DBQ(dst_name) ":" DBQ(%s) ", "
@@ -1001,6 +1017,8 @@ static FILE *report_head(struct state *state)
 			", " DBQ(lts) ":%d",
 			state->atlas, get_atlas_fw_version(),
 			get_timesync());
+		if (state->bundle)
+			fprintf(fh, DBQ(bundle) ":%s, ", state->bundle);
 	}
 
 	fprintf(fh, "%s" DBQ(time) ":%ld",
@@ -1108,7 +1126,7 @@ static int eat_alert(struct state *state)
 			return -1;
 
 		fprintf(fh, ", " DBQ(alert) ": { " DBQ(level) ": %d, "
-			DBQ(decription) ": %d }",
+			DBQ(description) ": %d }",
 			level, descr);
 
 		msgbuf->buffer.offset += 2;
@@ -1626,6 +1644,8 @@ static int sslgetcert_delete(void *vstate)
 
 	free(state->atlas);
 	state->atlas= NULL;
+	free(state->bundle);
+	state->bundle= NULL;
 	free(state->output_file);
 	state->output_file= NULL;
 	free(state->hostname);
