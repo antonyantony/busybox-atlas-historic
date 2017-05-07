@@ -3977,7 +3977,7 @@ for (i= 0; argv[i] != NULL; i++)
 	state->maxpacksize= maxpacksize;
 	state->maxhops= maxhops;
 	state->gaplimit= gaplimit;
-	state->interface= interface;
+	state->interface= interface ? strdup(interface) : NULL;
 	state->destportstr= strdup(destportstr);
 	state->duptimeout= duptimeout*1000;
 	state->timeout= timeout*1000;
@@ -4057,9 +4057,9 @@ static void traceroute_start2(void *state)
 
 	trtstate= state;
 
-	if (trtstate->busy)
+	if (!trtstate->busy)
 	{
-		printf("traceroute_start: busy, can't start\n");
+		printf("traceroute_start: not busy, can't continue\n");
 		return;
 	}
 	trtstate->busy= 1;
@@ -4180,6 +4180,8 @@ static int create_socket(struct trtstate *state, int do_tcp)
 		if (bind_interface(state->socket_icmp,
 			af, state->interface) == -1)
 		{
+			crondlog(LVL7 "binding to interface '%s' failed with '%s'", state->interface, strerror(errno));
+
 			snprintf(line, sizeof(line),
 	", " DBQ(error) ":" DBQ(bind_interface failed) " }");
 			add_str(state, line);
@@ -4443,6 +4445,13 @@ static void traceroute_start(void *state)
 
 	trtstate= state;
 
+	if (trtstate->busy)
+	{
+		printf("traceroute_start: busy, can't start\n");
+		return;
+	}
+	trtstate->busy= 1;
+
 	if (trtstate->response_out)
 	{
 		trtstate->resp_file_out= fopen(trtstate->response_out, "w");
@@ -4493,6 +4502,8 @@ static int traceroute_delete(void *state)
 
 	free(trtstate->atlas);
 	trtstate->atlas= NULL;
+	free(trtstate->interface);
+	trtstate->interface= NULL;
 	free(trtstate->bundle_id);
 	trtstate->bundle_id= NULL;
 	free(trtstate->hostname);

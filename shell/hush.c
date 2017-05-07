@@ -102,6 +102,7 @@
 /* In progress... */
 #define ENABLE_HUSH_FUNCTIONS 0
 
+#define DBQ(str) "\"" #str "\""
 
 /* If you comment out one of these below, it will be #defined later
  * to perform debug printfs to stderr: */
@@ -772,6 +773,7 @@ static int builtin_dfrm(char **argv);
 static int builtin_rxtxrpt(char **argv);
 static int builtin_rptaddrs(char **argv);
 static int builtin_rptuptime(char **argv);
+static int builtin_onlyuptime(char **argv);
 static int builtin_true(char **argv);
 static int builtin_set(char **argv);
 static int builtin_shift(char **argv);
@@ -833,6 +835,7 @@ static const struct built_in_command bltins[] = {
 	BLTIN("rxtxrpt"  , builtin_rxtxrpt, "report RX and TX"),
 	BLTIN("rptaddrs"  , builtin_rptaddrs, "report address(es), route(s), and dns"),
 	BLTIN("rptuptime"  , builtin_rptuptime, "report uptime"),
+	BLTIN("onlyuptime"  , builtin_onlyuptime, "report uptime in seconds"),
 	BLTIN("echo"  , builtin_echo, "Write to stdout"),
 	BLTIN("eval"  , builtin_eval, "Construct and run shell command"),
 	BLTIN("exec"  , builtin_exec, "Execute command, don't return to shell"),
@@ -4536,6 +4539,79 @@ static int builtin_epoch (char **argv)
 	return EXIT_SUCCESS;
 }
 
+#define NEW_FORMAT
+
+#ifdef NEW_FORMAT
+static int builtin_buddyinfo(char **argv) 
+{
+	char *lowmemChar;
+	unsigned lowmem = 0;
+	FILE *fp = xfopen_for_read("/proc/buddyinfo");
+	char aa[10];
+	char *my_mac ;
+	int i = 0;
+	int j = 0;
+	int memBlock = 4;
+	int need_reboot = 0; // don't reboot 
+	int freeMem = 0;
+	int jMax = 64; // enough
+	struct sysinfo info; 
+
+	lowmemChar =  argv[1];
+
+	if(lowmemChar) 
+		lowmem = xatou(lowmemChar);
+        fscanf(fp, "%s", aa); 
+        fscanf(fp, "%s", aa);
+        fscanf(fp, "%s", aa);
+        fscanf(fp, "%s", aa);
+
+        my_mac = getenv("ETHER_SCANNED");
+
+	if (lowmem >= 4 ) 
+	{
+		/* We need to reboot unless we find a big enough chunk
+		 * of memory.
+		 */
+		need_reboot = 1;
+	}
+        printf ("RESULT { " DBQ(id) ": " DBQ(9001) ", " DBQ(time) ": %lld",
+		(long long)time(0));
+	if (my_mac !=  NULL)
+		printf(", " DBQ(macaddr) ": " DBQ(%s), my_mac);
+
+	/* get uptime and print it */
+	sysinfo(&info);
+ 	printf (", " DBQ(uptime) ": %ld", info.uptime );
+	
+	printf(", " DBQ(buddyinfo) ": [ ");
+        for (j=0; j < jMax; j++)  
+        {
+                if (fscanf(fp, "%d", &i) != 1)
+			break;
+		printf("%s%d", j == 0 ? "" : ", ", i);
+		freeMem += ( memBlock * i);
+		if (i > 0 && lowmem >= 4 && memBlock >= lowmem)
+		{
+			/* Found a big enough chunk */
+			need_reboot = 0;
+		}
+		memBlock  *= 2; 
+        }
+
+	/* now print it */
+	printf (" ], " DBQ(freemem) ": %d }\n" ,  freeMem);
+
+	fclose (fp);
+
+	if(need_reboot)
+	{
+		fprintf(stderr, "buddy info returned 1 for block %d\n", lowmem);
+		return (EXIT_FAILURE);
+	}
+	return 0;
+}
+#else /* !NEW_FORMAT */
 static int builtin_buddyinfo(char **argv) 
 {
 	char *lowmemChar;
@@ -4625,6 +4701,7 @@ static int builtin_buddyinfo(char **argv)
 	}
 	return 0;
 }
+#endif /* NEW_FORMAT */
 
 static int builtin_findpid(char **argv)
 {
@@ -4706,6 +4783,16 @@ static int builtin_rptuptime(char **argv __attribute((unused)))
 	printf(DBQ(lts) ": %d, ", get_timesync());
 	sysinfo(&info);
 	printf(DBQ(uptime) ": %ld }\n", (long)info.uptime);
+
+	return 0;
+}
+
+static int builtin_onlyuptime(char **argv __attribute((unused))) 
+{
+	struct sysinfo info; 
+
+	sysinfo(&info);
+	printf("%ld\n", (long)info.uptime);
 
 	return 0;
 }
