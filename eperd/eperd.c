@@ -245,8 +245,7 @@ int eperd_main(int argc UNUSED_PARAM, char **argv)
 
 	INIT_G();
 
-	opt_complementary = "S-L:L-S:"
-			    ":i+:l+:d+"; /* -i, -l and -d have numeric param */
+	//opt_complementary = "f-b:b-f:S-L:L-S" ":i+:l+:d+"; /* -i, -l and -d have numeric param */
 	opt = getopt32(argv, "I:i:l:L:fc:A:DP:O:",
 			&interface_name,
 			&instance_id, &LogLevel, &LogFile, &CDir, &atlas_id,
