@@ -149,7 +149,7 @@ int get_atlas_fw_version(void)
 	{
 		crondlog(LVL9 "get_atlas_fw_version: unable to open '%s': %s",
 			ATLAS_FW_VERSION, strerror(errno));
-		return -1;
+		return CONFIG_FEATURE_ATLAS_FW_VERSION;
 	}
 	r= fscanf(file, "%d", &fw);
 	fclose(file);

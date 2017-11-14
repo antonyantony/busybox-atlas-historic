@@ -7,6 +7,14 @@ menu "Atlas eperd"
 
 INSERT
 
+config FEATURE_ATLAS_FW_VERSION
+	int "Atlas EPERD Version"
+	range 1 65535
+	default 4790
+	depends on EPERD
+	help
+	  FW version for measurment
+
 config ATLAS_ADDRESS_CHECK
 	bool "Atlas IP address check."
 	default y
