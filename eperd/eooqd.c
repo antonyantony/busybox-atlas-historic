@@ -62,7 +62,9 @@ static struct builtin
 	{ "evhttpget", &httpget_ops },
 	{ "evping", &ping_ops },
 	{ "evtdig", &tdig_ops },
+#if ENABLE_EVSSLGETCERT
 	{ "evsslgetcert", &sslgetcert_ops },
+#endif
 	{ "evtraceroute", &traceroute_ops },
 	{ NULL, NULL }
 };
