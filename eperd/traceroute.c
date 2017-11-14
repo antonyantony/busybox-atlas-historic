@@ -75,7 +75,10 @@ struct trtbase
 	 */
 	void (*done)(void *state);
 
-	u_char packet[MAX_DATA_SIZE];
+	/* Leave some space for headers. The various traceroute variations
+	 * have to check that it fits.
+	 */
+	u_char packet[MAX_DATA_SIZE+128];
 };
 
 struct trtstate
@@ -603,6 +606,12 @@ static void send_pkt(struct trtstate *state)
 			tcphdr->doff= len / 4;
 			tcphdr->syn= 1;
 
+			if (len+state->curpacksize > sizeof(base->packet))
+			{
+				crondlog(
+			DIE9 "base->packet too small, need at least %d",
+					len+state->curpacksize);
+			}
 			if (state->curpacksize > 0)
 			{
 				memset(&base->packet[len], '\0',
@@ -710,6 +719,14 @@ static void send_pkt(struct trtstate *state)
 
 			if (state->curpacksize < len)
 				state->curpacksize= len;
+			if (ICMP6_HDR+state->curpacksize >
+				sizeof(base->packet))
+			{
+				crondlog(
+			DIE9 "base->packet too small, need at least %d",
+					ICMP6_HDR+state->curpacksize);
+			}
+
 			if (state->curpacksize > len)
 			{
 				memset(&base->packet[ICMP6_HDR+len], '\0',
@@ -982,6 +999,12 @@ static void send_pkt(struct trtstate *state)
 			tcphdr->doff= len / 4;
 			tcphdr->syn= 1;
 
+			if (len+state->curpacksize > sizeof(base->packet))
+			{
+				crondlog(
+			DIE9 "base->packet too small, need at least %d",
+					len+state->curpacksize);
+			}
 			if (state->curpacksize > 0)
 			{
 				memset(&base->packet[len], '\0',
@@ -1095,14 +1118,26 @@ static void send_pkt(struct trtstate *state)
 
 			len= offsetof(struct icmp, icmp_data[2]);
 
-			if (state->curpacksize+ICMP_MINLEN < len)
+			/* currpacksize is the amount of data after the
+			 * ICMP header. len is the minimal amount of data
+			 * including the ICMP header. Later len becomes
+			 * the packet size including ICMP header.
+			 */
+			if (ICMP_MINLEN+state->curpacksize < len)
 				state->curpacksize= len-ICMP_MINLEN;
-			if (state->curpacksize+ICMP_MINLEN > len)
+			if (ICMP_MINLEN+state->curpacksize >
+				sizeof(base->packet))
+			{
+				crondlog(
+			DIE9 "base->packet too small, need at least %d",
+					ICMP_MINLEN+state->curpacksize);
+			}
+			if (ICMP_MINLEN+state->curpacksize > len)
 			{
 				memset(&base->packet[len], '\0',
-					state->curpacksize-ICMP_MINLEN-len);
+					ICMP_MINLEN+state->curpacksize-len);
 				strcpy((char *)&base->packet[len], id);
-				len= state->curpacksize+ICMP_MINLEN;
+				len= ICMP_MINLEN+state->curpacksize;
 			}
 
 			if (state->parismod)
@@ -2962,7 +2997,7 @@ static void ready_callback6(int __attribute((unused)) unused,
 	ssize_t nrecv;
 	int ind, rcvdttl, late, isDup, nxt, icmp_prefixlen, offset;
 	unsigned nextmtu, seq, optlen, hbhoptsize, dstoptsize;
-	size_t ehdrsiz, v6info_siz, siz;
+	size_t v6info_siz, siz;
 	struct trtbase *base;
 	struct trtstate *state;
 	struct ip6_hdr *eip;
@@ -3137,7 +3172,8 @@ static void ready_callback6(int __attribute((unused)) unused,
 			return;
 		}
 
-		/* Make sure we have TCP, UDP, ICMP or a fragment header */
+		/* Make sure we have TCP, UDP, ICMP, a fragment header or
+		 * an options header */
 		if (eip->ip6_nxt == IPPROTO_FRAGMENT ||
 			eip->ip6_nxt == IPPROTO_HOPOPTS ||
 			eip->ip6_nxt == IPPROTO_DSTOPTS ||
@@ -3145,7 +3181,6 @@ static void ready_callback6(int __attribute((unused)) unused,
 			eip->ip6_nxt == IPPROTO_UDP ||
 			eip->ip6_nxt == IPPROTO_ICMPV6)
 		{
-			ehdrsiz= 0;
 			frag= NULL;
 			nxt= eip->ip6_nxt;
 			ptr= &eip[1];
@@ -3154,12 +3189,12 @@ static void ready_callback6(int __attribute((unused)) unused,
 				/* Make sure the options header is completely
 				 * there.
 				 */
-				if (nrecv < sizeof(*icmp) + sizeof(*eip)
-					+ sizeof(*opthdr))
+				offset= (u_char *)ptr - base->packet;
+				if (offset + sizeof(*opthdr) > nrecv)
 				{
 #if 0
 					printf(
-			"ready_callback6: too short %d (icmp+ip+opt)\n",
+			"ready_callback6: too short %d (HOPOPTS)\n",
 						(int)nrecv);
 #endif
 					return;
@@ -3167,13 +3202,11 @@ static void ready_callback6(int __attribute((unused)) unused,
 				opthdr= (struct ip6_ext *)ptr;
 				hbhoptsize= 8*opthdr->ip6e_len;
 				optlen= hbhoptsize+8;
-				if (nrecv < sizeof(*icmp) + sizeof(*eip) +
-					optlen)
+				if (offset + optlen > nrecv)
 				{
 					/* Does not contain the full header */
 					return;
 				}
-				ehdrsiz += optlen;
 				nxt= opthdr->ip6e_nxt;
 				ptr= ((char *)opthdr)+optlen;
 			}
@@ -3182,12 +3215,12 @@ static void ready_callback6(int __attribute((unused)) unused,
 				/* Make sure the fragment header is completely
 				 * there.
 				 */
-				if (nrecv < sizeof(*icmp) + sizeof(*eip)
-					+ sizeof(*frag))
+				offset= (u_char *)ptr - base->packet;
+				if (offset + sizeof(*frag) > nrecv)
 				{
 #if 0
 					printf(
-			"ready_callback6: too short %d (icmp+ip+frag)\n",
+			"ready_callback6: too short %d (FRAGMENT)\n",
 						(int)nrecv);
 #endif
 					return;
@@ -3200,7 +3233,6 @@ static void ready_callback6(int __attribute((unused)) unused,
 					 */
 					return;
 				}
-				ehdrsiz += sizeof(*frag);
 				nxt= frag->ip6f_nxt;
 				ptr= &frag[1];
 			}
@@ -3209,12 +3241,12 @@ static void ready_callback6(int __attribute((unused)) unused,
 				/* Make sure the options header is completely
 				 * there.
 				 */
-				if (nrecv < sizeof(*icmp) + sizeof(*eip)
-					+ sizeof(*opthdr))
+				offset= (u_char *)ptr - base->packet;
+				if (offset + sizeof(*opthdr) > nrecv)
 				{
 #if 0
 					printf(
-			"ready_callback6: too short %d (icmp+ip+opt)\n",
+			"ready_callback6: too short %d (DSTOPTS)\n",
 						(int)nrecv);
 #endif
 					return;
@@ -3222,13 +3254,16 @@ static void ready_callback6(int __attribute((unused)) unused,
 				opthdr= (struct ip6_ext *)ptr;
 				dstoptsize= 8*opthdr->ip6e_len;
 				optlen= dstoptsize+8;
-				if (nrecv < sizeof(*icmp) + sizeof(*eip) +
-					optlen)
+				if (offset + optlen > nrecv)
 				{
 					/* Does not contain the full header */
+#if 0
+					printf(
+			"ready_callback6: too short %d (full DSTOPTS)\n",
+						(int)nrecv);
+#endif
 					return;
 				}
-				ehdrsiz += optlen;
 				nxt= opthdr->ip6e_nxt;
 				ptr= ((char *)opthdr)+optlen;
 			}
@@ -3236,19 +3271,19 @@ static void ready_callback6(int __attribute((unused)) unused,
 			v6info_siz= sizeof(*v6info);
 			if (nxt == IPPROTO_TCP)
 			{
-				ehdrsiz += sizeof(*etcp);
+				siz= sizeof(*etcp);
 				v6info_siz= 0;
 			}
 			else if (nxt == IPPROTO_UDP)
-				ehdrsiz += sizeof(*eudp);
+				siz= sizeof(*eudp);
 			else
-				ehdrsiz += sizeof(*eicmp);
+				siz= sizeof(*eicmp);
 
 			/* Now check if there is also a header in the
 			 * packet.
 			 */
-			if (nrecv < sizeof(*icmp) + sizeof(*eip)
-				+ ehdrsiz + v6info_siz)
+			offset= (u_char *)ptr - base->packet;
+			if (offset + siz + v6info_siz > nrecv)
 			{
 #if 0
 				printf(
@@ -3886,8 +3921,11 @@ for (i= 0; argv[i] != NULL; i++)
 				 */
 	do_tcp= !!(opt & OPT_T);
 	do_udp= !(do_icmp || do_tcp);
-	if (maxpacksize > sizeof(trt_base->packet))
-		maxpacksize= sizeof(trt_base->packet);
+	if (maxpacksize > MAX_DATA_SIZE)
+	{
+		crondlog(LVL8 "max. packet size too big");
+		return NULL;
+	}
 
 	if (response_in)
 	{
