@@ -45,6 +45,13 @@ config FEATURE_EOOQD_OUT_DIR
         help
           Location of eperd output ready to be fetched/deleted.
 
+config FEATURE_ATLAS_STORAGE_DIR
+        string "atlas storage directory."
+        default "/var/lib/eperd/storage"
+        depends on EPERD
+        help
+          Location of Atlas storage files
+
 config EPERD
 	bool "Eperd"
 	default n
