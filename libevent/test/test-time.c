@@ -25,6 +25,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include "event2/event-config.h"
+#include "util-internal.h"
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -41,7 +42,6 @@
 #include "event2/event.h"
 #include "event2/event_compat.h"
 #include "event2/event_struct.h"
-#include "util-internal.h"
 
 int called = 0;
 
@@ -70,7 +70,7 @@ time_cb(evutil_socket_t fd, short event, void *arg)
 			j = rand_int(NEVENT);
 			tv.tv_sec = 0;
 			tv.tv_usec = rand_int(50000);
-			if (tv.tv_usec % 2)
+			if (tv.tv_usec % 2 || called < NEVENT)
 				evtimer_add(ev[j], &tv);
 			else
 				evtimer_del(ev[j]);
@@ -109,6 +109,8 @@ main(int argc, char **argv)
 
 	event_dispatch();
 
+
+	printf("%d, %d\n", called, NEVENT);
 	return (called < NEVENT);
 }
 

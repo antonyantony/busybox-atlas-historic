@@ -11,8 +11,11 @@
 
 /* Numeric representation of the version */
 #define EVENT__NUMERIC_VERSION @EVENT_NUMERIC_VERSION@
+#define EVENT__PACKAGE_VERSION "@EVENT_PACKAGE_VERSION@"
 
-#define EVENT__PACKAGE_VERSION @EVENT_PACKAGE_VERSION@
+#define EVENT__VERSION_MAJOR @EVENT_VERSION_MAJOR@
+#define EVENT__VERSION_MINOR @EVENT_VERSION_MINOR@
+#define EVENT__VERSION_PATCH @EVENT_VERSION_PATCH@
 
 /* Version number of package */
 #define EVENT__VERSION "@EVENT_VERSION@"
@@ -33,13 +36,13 @@
 #define EVENT__PACKAGE_TARNAME ""
 
 /* Define if libevent should build without support for a debug mode */
-#cmakedefine EVENT__DISABLE_DEBUG_MODE 0
+#cmakedefine EVENT__DISABLE_DEBUG_MODE 1
 
 /* Define if libevent should not allow replacing the mm functions */
-#cmakedefine EVENT__DISABLE_MM_REPLACEMENT 0
+#cmakedefine EVENT__DISABLE_MM_REPLACEMENT 1
 
 /* Define if libevent should not be compiled with thread support */
-#cmakedefine EVENT__DISABLE_THREAD_SUPPORT 0
+#cmakedefine EVENT__DISABLE_THREAD_SUPPORT 1
 
 /* Define to 1 if you have the `accept4' function. */
 #cmakedefine EVENT__HAVE_ACCEPT4 1
@@ -49,6 +52,9 @@
 
 /* Define to 1 if you have the `arc4random_buf' function. */
 #cmakedefine EVENT__HAVE_ARC4RANDOM_BUF 1
+
+/* Define to 1 if you have the `arc4random_addrandom' function. */
+#cmakedefine EVENT__HAVE_ARC4RANDOM_ADDRANDOM 1
 
 /* Define if clock_gettime is available in libc */
 #cmakedefine EVENT__DNS_USE_CPU_CLOCK_FOR_ID 1
@@ -64,13 +70,16 @@
 #cmakedefine EVENT__HAVE_CLOCK_GETTIME 1
 
 /* Define to 1 if you have the declaration of `CTL_KERN'. */
-#cmakedefine EVENT__HAVE_DECL_CTL_KERN 1
+#define EVENT__HAVE_DECL_CTL_KERN @EVENT__HAVE_DECL_CTL_KERN@
 
 /* Define to 1 if you have the declaration of `KERN_ARND'. */
-#cmakedefine EVENT__HAVE_DECL_KERN_ARND 0
+#define EVENT__HAVE_DECL_KERN_ARND @EVENT__HAVE_DECL_KERN_ARND@
 
 /* Define to 1 if you have the declaration of `KERN_RANDOM'. */
-#cmakedefine EVENT__HAVE_DECL_KERN_RANDOM 1
+#define EVENT__HAVE_DECL_KERN_RANDOM @EVENT__HAVE_DECL_KERN_RANDOM@
+
+/* Define to 1 if you have the declaration of `RANDOM_UUID'. */
+#define EVENT__HAVE_DECL_RANDOM_UUID @EVENT__HAVE_DECL_RANDOM_UUID@
 
 /* Define if /dev/poll is available */
 #cmakedefine EVENT__HAVE_DEVPOLL 1
@@ -184,9 +193,6 @@
 /* Define to 1 if you have the `usleep' function. */
 #cmakedefine EVENT__HAVE_USLEEP 1
 
-/* Define to 1 if you have the <netdb.h> header file. */
-#cmakedefine EVENT__HAVE_NETDB_H 1
-
 /* Define to 1 if you have the <netinet/in6.h> header file. */
 #cmakedefine EVENT__HAVE_NETINET_IN6_H 1
 
@@ -198,9 +204,6 @@
 
 /* Define if the system has openssl */
 #cmakedefine EVENT__HAVE_OPENSSL 1
-
-/* Defines if the system has zlib */
-#cmakedefine EVENT__HAVE_ZLIB 1
 
 /* Define to 1 if you have the `pipe' function. */
 #cmakedefine EVENT__HAVE_PIPE 1
@@ -219,9 +222,6 @@
 
 /* Define to 1 if you have the <port.h> header file. */
 #cmakedefine EVENT__HAVE_PORT_H 1
-
-/* Define if you have POSIX threads libraries and header files. */
-#cmakedefine EVENT__HAVE_PTHREAD 1
 
 /* Define if we have pthreads on this system */
 #cmakedefine EVENT__HAVE_PTHREADS 1
@@ -246,9 +246,6 @@
 
 /* Define to 1 if you have the `sendfile' function. */
 #cmakedefine EVENT__HAVE_SENDFILE 1
-
-/* Define if F_SETFD is defined in <fcntl.h> */
-#cmakedefine EVENT__HAVE_SETFD 1
 
 /* Define to 1 if you have the `sigaction' function. */
 #cmakedefine EVENT__HAVE_SIGACTION 1
@@ -319,6 +316,9 @@
 /* Define to 1 if `__ss_family' is a member of `struct sockaddr_storage'. */
 #cmakedefine EVENT__HAVE_STRUCT_SOCKADDR_STORAGE___SS_FAMILY 1
 
+/* Define to 1 if the system has the type `struct linger'. */
+#cmakedefine EVENT__HAVE_STRUCT_LINGER 1
+
 /* Define to 1 if you have the `sysctl' function. */
 #cmakedefine EVENT__HAVE_SYSCTL 1
 
@@ -365,7 +365,7 @@
 #cmakedefine EVENT__HAVE_SYS_SYSCTL_H 1
 
 /* Define to 1 if you have the <sys/timerfd.h> header file. */
-#cmakedefine EVENT__HAVE_SYS_TIMERFD_H */
+#cmakedefine EVENT__HAVE_SYS_TIMERFD_H 1
 
 /* Define to 1 if you have the <sys/time.h> header file. */
 #cmakedefine EVENT__HAVE_SYS_TIME_H 1
@@ -379,6 +379,9 @@
 /* Define to 1 if you have the <sys/wait.h> header file. */
 #cmakedefine EVENT__HAVE_SYS_WAIT_H 1
 
+/* Define to 1 if you have the <errno.h> header file. */
+#cmakedefine EVENT__HAVE_ERRNO_H 1
+
 /* Define if TAILQ_FOREACH is defined in <sys/queue.h> */
 #cmakedefine EVENT__HAVE_TAILQFOREACH 1
 
@@ -390,6 +393,7 @@
 
 /* Define if timercmp is defined in <sys/time.h> */
 #cmakedefine EVENT__HAVE_TIMERCMP 1
+
 
 /* Define to 1 if you have the `timerfd_create' function. */
 #cmakedefine EVENT__HAVE_TIMERFD_CREATE 1
@@ -427,73 +431,84 @@
 /* Define if kqueue works correctly with pipes */
 #cmakedefine EVENT__HAVE_WORKING_KQUEUE 1
 
-/* Define to necessary symbol if this constant uses a non-standard name on
-   your system. */
-#cmakedefine EVENT__PTHREAD_CREATE_JOINABLE ${EVENT__PTHREAD_CREATE_JOINABLE}
+#ifdef __USE_UNUSED_DEFINITIONS__
+/* Define to necessary symbol if this constant uses a non-standard name on your system. */
+/* XXX: Hello, this isn't even used, nor is it defined anywhere... - Ellzey */
+#define EVENT__PTHREAD_CREATE_JOINABLE ${EVENT__PTHREAD_CREATE_JOINABLE}
+#endif
 
 /* The size of `pthread_t', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_PTHREAD_T ${EVENT__SIZEOF_PTHREAD_T}
+#define EVENT__SIZEOF_PTHREAD_T @EVENT__SIZEOF_PTHREAD_T@
 
 /* The size of a `int', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_INT ${EVENT__SIZEOF_INT}
+#define EVENT__SIZEOF_INT @EVENT__SIZEOF_INT@
 
 /* The size of a `long', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_LONG ${EVENT__SIZEOF_LONG}
+#define EVENT__SIZEOF_LONG @EVENT__SIZEOF_LONG@
 
 /* The size of a `long long', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_LONG_LONG ${EVENT__SIZEOF_LONG_LONG}
+#define EVENT__SIZEOF_LONG_LONG @EVENT__SIZEOF_LONG_LONG@
 
 /* The size of `off_t', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_OFF_T ${EVENT__SIZEOF_OFF_T}
+#define EVENT__SIZEOF_OFF_T @EVENT__SIZEOF_OFF_T@
+
+#define EVENT__SIZEOF_SSIZE_T @EVENT__SIZEOF_SSIZE_T@
+
 
 /* The size of a `short', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_SHORT ${EVENT__SIZEOF_SHORT}
+#define EVENT__SIZEOF_SHORT @EVENT__SIZEOF_SHORT@
 
 /* The size of `size_t', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_SIZE_T ${EVENT__SIZEOF_SIZE_T}
+#define EVENT__SIZEOF_SIZE_T @EVENT__SIZEOF_SIZE_T@
 
 /* Define to 1 if you have the ANSI C header files. */
-#cmakedefine EVENT__STDC_HEADERS ${EVENT__STDC_HEADERS}
+#cmakedefine EVENT__STDC_HEADERS 1
 
 /* Define to 1 if you can safely include both <sys/time.h> and <time.h>. */
-#cmakedefine EVENT__TIME_WITH_SYS_TIME ${EVENT__TIME_WITH_SYS_TIME}
+#cmakedefine EVENT__TIME_WITH_SYS_TIME 1
 
 /* The size of `socklen_t', as computed by sizeof. */
-#cmakedefine EVENT__SIZEOF_SOCKLEN_T ${EVENT__SIZEOF_SOCKLEN_T}
+#define EVENT__SIZEOF_SOCKLEN_T @EVENT__SIZEOF_SOCKLEN_T@
 
 /* The size of 'void *', as computer by sizeof */
-#cmakedefine EVENT__SIZEOF_VOID_P ${EVENT__SIZEOF_VOID_P}
+#define EVENT__SIZEOF_VOID_P @EVENT__SIZEOF_VOID_P@
 
-/* Define to appropriate substitute if compiler doesnt have __func__ */
-#cmakedefine EVENT____func__ ${EVENT____func__}
+/* set an alias for whatever __func__ __FUNCTION__ is, what sillyness */
+#if defined (__func__)
+#define EVENT____func__ __func__
+#elif defined(__FUNCTION__)
+#define EVENT____func__  __FUNCTION__
+#else
+#define EVENT____func__ __FILE__
+#endif
 
-/* Number of bits in a file offset, on hosts where this is settable. */
-#cmakedefine EVENT___FILE_OFFSET_BITS ${EVENT___FILE_OFFSET_BITS}
-
-/* Define for large files, on AIX-style hosts. */
-/* #undef _LARGE_FILES */
-
-/* Define to empty if `const' does not conform to ANSI C. */
-/* #undef EVENT__const */
 
 /* Define to `__inline__' or `__inline' if that's what the C compiler
    calls it, or to nothing if 'inline' is not supported under any name.  */
 #ifndef __cplusplus
-#cmakedefine EVENT__inline ${EVENT__inline}
+/* why not c++?
+ *
+ *  and are we really expected to use EVENT__inline everywhere,
+ *  shouldn't we just do:
+ *     ifdef EVENT__inline
+ *     define inline EVENT__inline
+ *
+ * - Ellzey
+ */
+
+#define EVENT__inline @EVENT__inline@
 #endif
 
-/* Define to `int' if <sys/types.h> does not define. */
-#cmakedefine EVENT__pid_t ${EVENT__pid_t}
+/* Define to `int' if <sys/tyes.h> does not define. */
+#define EVENT__pid_t @EVENT__pid_t@
 
 /* Define to `unsigned' if <sys/types.h> does not define. */
-#cmakedefine EVENT__size_t ${EVENT__size_t}
+#define EVENT__size_t @EVENT__size_t@
 
 /* Define to unsigned int if you dont have it */
-#cmakedefine EVENT__socklen_t ${EVENT__socklen_t}
+#define EVENT__socklen_t @EVENT__socklen_t@
 
 /* Define to `int' if <sys/types.h> does not define. */
-#cmakedefine EVENT__ssize_t ${EVENT__ssize_t}
+#define EVENT__ssize_t @EVENT__ssize_t@
 
-#cmakedefine EVENT__NEED_DLLIMPORT ${EVENT__NEED_DLLIMPORT}
-
-#endif
+#endif /* \EVENT2_EVENT_CONFIG_H_INCLUDED_ */

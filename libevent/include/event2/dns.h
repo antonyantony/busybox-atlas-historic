@@ -623,7 +623,8 @@ typedef void (*evdns_request_callback_fn_type)(struct evdns_server_request *, vo
     @param callback A function to invoke whenever we get a DNS request
       on the socket.
     @param user_data Data to pass to the callback.
-    @return an evdns_server_port structure for this server port.
+    @return an evdns_server_port structure for this server port or NULL if
+      an error occurred.
  */
 EVENT2_EXPORT_SYMBOL
 struct evdns_server_port *evdns_add_server_port_with_base(struct event_base *base, evutil_socket_t socket, int flags, evdns_request_callback_fn_type callback, void *user_data);
@@ -701,6 +702,22 @@ struct evdns_getaddrinfo_request *evdns_getaddrinfo(
  * and the callback will be invoked with the error EVUTIL_EAI_CANCEL. */
 EVENT2_EXPORT_SYMBOL
 void evdns_getaddrinfo_cancel(struct evdns_getaddrinfo_request *req);
+
+/**
+   Retrieve the address of the 'idx'th configured nameserver.
+
+   @param base The evdns_base to examine.
+   @param idx The index of the nameserver to get the address of.
+   @param sa A location to receive the server's address.
+   @param len The number of bytes available at sa.
+
+   @return the number of bytes written into sa on success.  On failure, returns
+     -1 if idx is greater than the number of configured nameservers, or a
+     value greater than 'len' if len was not high enough.
+ */
+EVENT2_EXPORT_SYMBOL
+int evdns_base_get_nameserver_addr(struct evdns_base *base, int idx,
+    struct sockaddr *sa, ev_socklen_t len);
 
 #ifdef __cplusplus
 }
